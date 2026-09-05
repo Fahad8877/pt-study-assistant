@@ -73,8 +73,8 @@ If the API is unreachable the app automatically falls back to the mock provider.
 The app is static, so any static host works. `build-bundle.ps1` produces `dist/index.html`,
 a single self-contained file (CSS and JS inlined; only the CDN libraries and fonts stay external).
 
-- **Hosted copy on claude.ai (current):** https://claude.ai/code/artifact/943b5fab-5c47-4fad-9afb-97b9575d4af2
-  (private to the owner's account; use the page's Share menu to give others access).
+- **Live public site:** https://fahad8877.github.io/pt-study-assistant/
+  (GitHub Pages, deployed from the `main` branch of https://github.com/Fahad8877/pt-study-assistant).
 - **GitHub Pages (recommended, free, permanent):** create a free GitHub account and an empty
   public repository, then run
   `powershell -ExecutionPolicy Bypass -File deploy-github-pages.ps1 -Repo <repository URL>`.
