@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PT Study Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a href="#/" class="brand">
+      <span class="brand-mark">PT</span>
+      <span class="brand-name" data-i18n="app.name">PT Study Assistant</span>
+    </a>
+    <nav class="nav" id="main-nav">
+      <a href="#/" data-route="dashboard" data-i18n="nav.dashboard">Dashboard</a>
+      <a href="#/upload" data-route="upload" data-i18n="nav.upload">Upload</a>
+      <a href="#/lectures" data-route="lectures" data-i18n="nav.lectures">My Lectures</a>
+      <a href="#/quiz" data-route="quiz" data-i18n="nav.quiz">Quiz</a>
+      <a href="#/case" data-route="case" data-i18n="nav.case">Clinical Case</a>
+    </nav>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button type="button" data-lang="en" class="active">EN</button>
+      <button type="button" data-lang="ar">عربي</button>
+    </div>
+  </header>
+
+  <main id="view" class="view"></main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- Third-party parsers (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <!-- App -->
+  <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/parsers.js"></script>
+  <script src="js/sample-lecture.js"></script>
+  <script src="js/ai/mock.js"></script>
+  <script src="js/ai/api.js"></script>
+  <script src="js/ai/index.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
