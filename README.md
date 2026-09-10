@@ -54,7 +54,9 @@ The UI only talks to `window.AI` (`analyze`, `quiz`, `clinicalCase`). Providers 
 ```
 analyze -> { explanation: string[], summary: string[],
              concepts: [{ title, detail }], terms: [{ term, definition }] }
-quiz    -> { questions: [{ question, options: string[], answerIndex, explanation }] }
+quiz    -> { questions: [{ scenario, question, options: string[], answerIndex,
+                           explanation, whyOthers: string[] }] }
+           (request carries quiz: { count, slides: [{ number, text }] } for the selected scope)
 case    -> { title, presentation: string[], questions: [
               { type: "mcq",  question, options, answerIndex, feedback } |
               { type: "open", question, modelAnswer, keywords: string[] } ] }

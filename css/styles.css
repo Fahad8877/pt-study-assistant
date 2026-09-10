@@ -374,6 +374,35 @@ html[dir="rtl"] .continue .label { letter-spacing: 0; }
 .feedback.bad { background: var(--danger-soft); border-color: #f2c9c6; }
 .feedback strong { display: block; margin-bottom: 0.25rem; }
 
+/* Quiz scope selection */
+.scope-options .option strong { display: block; margin-bottom: 0.1rem; }
+.slide-list-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin: 1rem 0 0.5rem; }
+.slide-list { display: grid; gap: 0.4rem; max-height: 320px; overflow: auto; padding: 0.15rem; }
+.slide-pick {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  cursor: pointer;
+  font-size: 0.93rem;
+}
+.slide-pick:hover { border-color: var(--primary); }
+.slide-pick input { margin-top: 0.25rem; accent-color: var(--primary); }
+.slide-pick.checked { background: var(--primary-soft); border-color: var(--primary-soft); }
+.scenario {
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--bg);
+  border-inline-start: 3px solid var(--primary);
+  border-radius: 8px;
+  font-size: 0.97rem;
+}
+.why-others { margin: 0.6rem 0 0; padding-inline-start: 1.2rem; font-size: 0.9rem; }
+.why-others li { margin-bottom: 0.3rem; }
+
 .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-bottom: 1.25rem; }
 .progress-bar span { display: block; height: 100%; background: var(--primary); transition: width 0.25s ease; }
 

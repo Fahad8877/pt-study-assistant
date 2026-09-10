@@ -6,30 +6,45 @@
  *
  *   task "analyze"  -> { explanation: string[], summary: string[],
  *                        concepts: [{title, detail}], terms: [{term, definition}] }
- *   task "quiz"     -> { questions: [{question, options: string[], answerIndex, explanation}] }
+ *   task "quiz"     -> { questions: [{scenario, question, options: string[], answerIndex,
+ *                                     explanation, whyOthers: string[] (aligned with options)}] }
+ *                      Request extras: quiz: { count, slides: [{number, text}] } — only the
+ *                      selected slides are sent, and `count` is the desired number of questions.
  *   task "case"     -> { title, presentation: string[], questions: [
  *                          {type: "mcq", question, options, answerIndex, feedback} |
  *                          {type: "open", question, modelAnswer, keywords: string[]} ] }
  */
 (function () {
-  async function request(task, lecture, language) {
+  async function request(task, lecture, language, extra) {
     const res = await fetch(window.APP_CONFIG.apiEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: JSON.stringify(Object.assign({
         task,
         language,
         lecture: { title: lecture.title, text: lecture.text },
-      }),
+      }, extra || {})),
     });
     if (!res.ok) throw new Error("AI API error: " + res.status);
     return res.json();
   }
 
+  function quizExtra(lecture, opts) {
+    const o = opts || {};
+    const all = window.Parsers.segments(lecture);
+    const chosen = Array.isArray(o.slideIndexes) && o.slideIndexes.length ? all.filter((s) => o.slideIndexes.includes(s.index)) : all;
+    return {
+      quiz: {
+        count: o.count || window.APP_CONFIG.quizCountFor(chosen.length),
+        slides: chosen.map((s) => ({ number: s.number, text: s.text })),
+      },
+    };
+  }
+
   window.AIProviders = window.AIProviders || {};
   window.AIProviders.api = {
     analyze: (lecture, lang) => request("analyze", lecture, lang),
-    quiz: (lecture, lang) => request("quiz", lecture, lang),
+    quiz: (lecture, lang, opts) => request("quiz", lecture, lang, quizExtra(lecture, opts)),
     clinicalCase: (lecture, lang) => request("case", lecture, lang),
   };
 })();

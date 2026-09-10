@@ -3,7 +3,7 @@ window.SAMPLE_LECTURE = {
   title: "Anterior Cruciate Ligament Injury and Rehabilitation",
   fileName: "ACL_Injury_and_Rehabilitation.pptx",
   fileType: "pptx",
-  units: 12,
+  units: 10,
   unitType: "slides",
   text: `Anterior Cruciate Ligament Injury and Rehabilitation
 Master of Physical Therapy - Musculoskeletal Module

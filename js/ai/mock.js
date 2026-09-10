@@ -110,19 +110,24 @@
   function esc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
   function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
-  function splitSentences(text) {
+  /** Splits the chosen segments (slides/pages) into sentences tagged with their segment index. */
+  function splitSentences(segments, chosen) {
     const out = [];
     const seen = new Set();
-    text.split(/\n+/).forEach((line) => {
-      line.split(/(?<=[.!?])\s+(?=[A-Z"'(])/).forEach((raw) => {
-        const s = raw.trim().replace(/\s+/g, " ");
-        const key = s.toLowerCase();
-        if (s.length < 30 || s.length > 320) return;
-        if (!/[a-z]{3}/i.test(s)) return;
-        if ((s.match(/[A-Za-z]/g) || []).length / s.length < 0.6) return;
-        if (seen.has(key)) return;
-        seen.add(key);
-        out.push({ text: s, index: out.length });
+    chosen.forEach((segIndex) => {
+      const seg = segments[segIndex];
+      if (!seg) return;
+      seg.text.split(/\n+/).forEach((line) => {
+        line.split(/(?<=[.!?])\s+(?=[A-Z"'(])/).forEach((raw) => {
+          const s = raw.trim().replace(/\s+/g, " ");
+          const key = s.toLowerCase();
+          if (s.length < 30 || s.length > 320) return;
+          if (!/[a-z]{3}/i.test(s)) return;
+          if ((s.match(/[A-Za-z]/g) || []).length / s.length < 0.6) return;
+          if (seen.has(key)) return;
+          seen.add(key);
+          out.push({ text: s, index: out.length, seg: segIndex });
+        });
       });
     });
     return out;
@@ -228,9 +233,11 @@
     return phrase;
   }
 
-  function analyzeText(lecture) {
+  function analyzeText(lecture, segIndexes) {
     seed = hash(lecture.id || lecture.title || "x");
-    const sentences = splitSentences(lecture.text);
+    const segments = window.Parsers.segments(lecture);
+    const chosen = Array.isArray(segIndexes) && segIndexes.length ? segIndexes.filter((i) => segments[i]) : segments.map((_, i) => i);
+    const sentences = splitSentences(segments, chosen);
     const freq = wordFreq(sentences);
     scoreSentences(sentences, freq);
     const defs = extractDefinitions(sentences);
@@ -286,67 +293,345 @@
     };
   }
 
-  async function quiz(lecture, lang) {
-    await delay(700 + Math.random() * 500);
-    const L = FRAMES[lang] || FRAMES.en;
-    const a = analyzeText(lecture);
-    const n = window.APP_CONFIG.quizQuestions || 6;
-    const questions = [];
-    const usedSentences = new Set();
-    const termPool = a.defs.map((d) => d.term).concat(a.concepts.map((c) => c.title))
-      .filter((t, i, arr) => arr.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i);
+  /* ---------- quiz generation (clinical reasoning oriented) ----------
+   * Questions are built from relationships found in the selected slides:
+   *   why      – mechanism / rationale ("... because ...")
+   *   effect   – consequence ("... leads to / results in ...")
+   *   sequence – progression through phases or stages
+   *   decision – clinical decision-making (should / avoid / recommended ...)
+   *   match    – distinguishing related concepts (correct vs mismatched pairs)
+   *   threshold– interpreting a measured value against a criterion
+   *   statement– identifying the correct statement among altered ones
+   *   term     – labelling a described finding (used only when little else exists)
+   * Distractors are always derived from the same slides (other reasons, other
+   * phases, mismatched pairs, or statements with a key concept reversed).
+   */
+  const QUIZ_FRAMES = {
+    en: {
+      qWhy: (x) => `According to the lecture, why ${x}?`,
+      qEffect: (x) => `According to the lecture, what follows from this: "${x}"?`,
+      qDecision: "You are planning management for a patient with the condition discussed in this lecture. Which of the following decisions is consistent with the lecture?",
+      qMatch: "Which of the following correctly pairs a concept with its description, as presented in the lecture?",
+      qThreshold: (v, unit) => `A patient is assessed against the criterion described above. The measured value is ${v} ${unit}. What is the correct interpretation?`.replace(/\s+\./, "."),
+      qSequence: (phase, focus) => `A patient has completed ${phase}, which the lecture describes as: "${focus}". What should the next phase focus on?`,
+      qStatement: "Which of the following statements is correct according to the lecture?",
+      qStatementAbout: (subject) => `Which statement about ${subject} is correct according to the lecture?`,
+      qTerm: (desc) => `A clinical note describes the following finding: "${desc}". Which term from the lecture correctly labels it?`,
+      expCorrect: (s) => `Correct. The lecture states: "${s}"`,
+      expWhy: (x, y) => `Correct. The lecture explains that ${x} because ${y}.`,
+      expSequence: (phase, s) => `Correct. The lecture describes ${phase} as: "${s}"`,
+      expMatch: (term, desc) => `Correct. The lecture describes ${term} as: "${desc}"`,
+      expThreshold: (v, unit, n, met) => `${met ? "The criterion is met" : "The criterion is not met"}: the measured value (${v} ${unit}) is ${met ? "on the right side of" : "outside"} the threshold of ${n} ${unit} given in the lecture.`.replace(/\s+\)/g, ")").replace(/\s+\./g, "."),
+      whyAltered: (orig) => `This reverses what the lecture says: "${orig}"`,
+      whyOtherReason: (x) => `This is the rationale the lecture gives for a different point: "${x}"`,
+      whyMismatch: (term, desc) => `${term} is actually described as: "${desc}"`,
+      whyPhase: (phase) => `This is the focus of ${phase}, not of the next phase.`,
+      whyThresholdVerdict: (v, n, unit) => `The verdict is wrong: compare ${v} ${unit} with the threshold of ${n} ${unit}.`.replace(/\s+\./g, "."),
+      whyThresholdDirection: (phrase) => `The direction of the criterion is wrong; the lecture says "${phrase}".`,
+      whyThresholdNumber: (n, unit) => `The threshold in the lecture is ${n} ${unit}, not this value.`.replace(/\s+,/g, ","),
+      whyOtherTerm: (term, desc) => `${term} refers to a different finding: "${desc}"`,
+      optMet: (op, n, unit) => `The criterion is met, because the lecture requires ${op} ${n} ${unit}`.trim(),
+      optNotMet: (op, n, unit) => `The criterion is not met, because the lecture requires ${op} ${n} ${unit}`.trim(),
+      atLeast: "at least", atMost: "at most",
+      phaseWord: (label) => label,
+    },
+    ar: {
+      qWhy: (x) => `وفقًا للمحاضرة، لماذا ${x}؟`,
+      qEffect: (x) => `وفقًا للمحاضرة، ما الذي يترتب على ما يلي: "${x}"؟`,
+      qDecision: "أنت تخطط لعلاج مريض يعاني من الحالة التي تناولتها هذه المحاضرة. أيٌّ من القرارات التالية يتوافق مع المحاضرة؟",
+      qMatch: "أيٌّ مما يلي يربط المفهوم بوصفه الصحيح كما ورد في المحاضرة؟",
+      qThreshold: (v, unit) => `تم تقييم مريض وفق المعيار الموضح أعلاه. القيمة المقاسة هي ${v} ${unit}. ما التفسير الصحيح؟`,
+      qSequence: (phase, focus) => `أكمل مريض ${phase}، والتي تصفها المحاضرة بأنها: "${focus}". على ماذا يجب أن تركز المرحلة التالية؟`,
+      qStatement: "أيٌّ من العبارات التالية صحيحة وفقًا للمحاضرة؟",
+      qStatementAbout: (subject) => `أي عبارة بخصوص ${subject} صحيحة وفقًا للمحاضرة؟`,
+      qTerm: (desc) => `يصف تقرير سريري النتيجة التالية: "${desc}". ما المصطلح من المحاضرة الذي يصفها بشكل صحيح؟`,
+      expCorrect: (s) => `إجابة صحيحة. تذكر المحاضرة: "${s}"`,
+      expWhy: (x, y) => `إجابة صحيحة. توضح المحاضرة أن ${x} لأن ${y}.`,
+      expSequence: (phase, s) => `إجابة صحيحة. تصف المحاضرة ${phase} بأنها: "${s}"`,
+      expMatch: (term, desc) => `إجابة صحيحة. تصف المحاضرة ${term} بأنه: "${desc}"`,
+      expThreshold: (v, unit, n, met) => `${met ? "المعيار متحقق" : "المعيار غير متحقق"}: القيمة المقاسة (${v} ${unit}) ${met ? "تقع ضمن" : "تقع خارج"} الحد البالغ ${n} ${unit} المذكور في المحاضرة.`,
+      whyAltered: (orig) => `هذا يعكس ما تقوله المحاضرة: "${orig}"`,
+      whyOtherReason: (x) => `هذا هو التعليل الذي تقدمه المحاضرة لنقطة مختلفة: "${x}"`,
+      whyMismatch: (term, desc) => `${term} يوصف في الواقع بأنه: "${desc}"`,
+      whyPhase: (phase) => `هذا هو تركيز ${phase} وليس المرحلة التالية.`,
+      whyThresholdVerdict: (v, n, unit) => `الحكم خاطئ: قارن ${v} ${unit} بالحد البالغ ${n} ${unit}.`,
+      whyThresholdDirection: (phrase) => `اتجاه المعيار خاطئ؛ تقول المحاضرة "${phrase}".`,
+      whyThresholdNumber: (n, unit) => `الحد المذكور في المحاضرة هو ${n} ${unit} وليس هذه القيمة.`,
+      whyOtherTerm: (term, desc) => `${term} يشير إلى نتيجة مختلفة: "${desc}"`,
+      optMet: (op, n, unit) => `المعيار متحقق، لأن المحاضرة تشترط ${op} ${n} ${unit}`.trim(),
+      optNotMet: (op, n, unit) => `المعيار غير متحقق، لأن المحاضرة تشترط ${op} ${n} ${unit}`.trim(),
+      atLeast: "على الأقل", atMost: "على الأكثر",
+      phaseWord: (label) => label,
+    },
+  };
 
-    function distractors(correct, pool, count) {
-      const others = shuffle(pool.filter((p) => p.toLowerCase() !== correct.toLowerCase() && !correct.toLowerCase().includes(p.toLowerCase()) && !p.toLowerCase().includes(correct.toLowerCase())));
-      return others.slice(0, count);
+  const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+  const ANTONYM_PAIRS = [
+    ["should be avoided", "is recommended"], ["should not", "should"], ["not recommended", "recommended"], ["non-contact", "contact"],
+    ["at least", "at most"], ["intra-articular", "extra-articular"], ["closed kinetic chain", "open kinetic chain"],
+    ["anterior", "posterior"], ["medial", "lateral"], ["internal", "external"], ["flexion", "extension"], ["increase", "decrease"],
+    ["increases", "decreases"], ["increased", "decreased"], ["more", "less"], ["higher", "lower"], ["greater", "smaller"],
+    ["before", "after"], ["early", "late"], ["proximal", "distal"], ["superior", "inferior"], ["maximum", "minimum"],
+    ["concentric", "eccentric"], ["sensitive", "specific"], ["acute", "chronic"], ["above", "below"], ["most", "least"],
+    ["preferred", "avoided"], ["contraindicated", "indicated"], ["ipsilateral", "contralateral"], ["passive", "active"],
+    ["static", "dynamic"], ["inward", "outward"], ["resist", "allow"], ["prevents", "causes"], ["reduce", "increase"],
+    ["reduces", "increases"], ["improves", "worsens"], ["weakness", "strength"], ["limited", "excessive"], ["inhibition", "facilitation"],
+    ["first", "last"], ["primary", "secondary"], ["highly", "poorly"], ["appropriate", "inappropriate"], ["stability", "instability"],
+  ];
+  const ANTONYMS = ANTONYM_PAIRS.concat(ANTONYM_PAIRS.map(([a, b]) => [b, a])).sort((x, y) => y[0].length - x[0].length);
+  const OBJECTIVE_RE = /^(describe|identify|perform|outline|explain|list|discuss|understand|define|recognize|recognise|compare|apply|learning objectives?|objectives?)\b/i;
+  const FACT_RE = /\b(is|are|was|were|has|have|should|can|may|must|require[sd]?|provide[sd]?|include[sd]?|focus(?:es)?|occur[s]?|develop[s]?|report|describe[sd]?|reproduce[sd]?|assess(?:es)?|performed|recommended|preferred|prevent[s]?|resist[s]?|limit[s]?|run[s]?|introduce[sd]?|compare[sd]?|used|avoided|appropriate|places|produce[s]?|decreases|increases)\b/i;
+  const CAUSE_RE = /\b(because|partly due to|due to|since|as a result of|caused by|so that|in order to)\b/i;
+  const EFFECT_RE = /\b(leads to|results in|resulting in|which allows|allowing)\b/i;
+  const DECISION_RE = /\b(should|should not|avoid|avoided|recommended|not recommended|preferred|appropriate|contraindicated|indicated|must|required|requires|is used|are used|generally)\b/i;
+  const THRESH_RE = /\b(at least|a minimum of|minimum of|more than|greater than|above|over|not before|at most|less than|below|within|no more than|a maximum of|maximum of)\s+(?:the\s+)?(\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(percent|%|degrees|months|weeks|days|hours|years|repetitions|seconds|minutes|kg|cm|mm|times)?/i;
+  const PHASE_RE = /\b(phase|stage|step|week|grade|level)\s+(one|two|three|four|five|six|\d)\b/i;
+
+  function lowerFirst(s) { return /^[A-Z][a-z]/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s; }
+  function stripEnd(s) { return s.replace(/[.\s]+$/, ""); }
+  function shorten(s, max) { return s.length <= max ? s : s.slice(0, max).replace(/\s+\S*$/, "") + "…"; }
+
+  /** All distinct plausible-but-wrong versions of a statement, each reversing one key concept or number. */
+  function alterAll(text) {
+    const out = [];
+    const seen = new Set([text.toLowerCase()]);
+    for (const [from, to] of ANTONYMS) {
+      const re = new RegExp("\\b" + esc(from) + "\\b", "i");
+      const m = text.match(re);
+      if (!m) continue;
+      const rep = /^[A-Z]/.test(m[0]) ? cap(to) : to;
+      const altered = text.replace(re, rep);
+      if (seen.has(altered.toLowerCase())) continue;
+      seen.add(altered.toLowerCase());
+      out.push({ text: altered, from: m[0], to: rep });
     }
-    function push(question, correct, wrongs, explanation) {
-      if (wrongs.length < 2) return false;
-      const options = shuffle([correct].concat(wrongs.slice(0, 3)));
-      questions.push({ question, options, answerIndex: options.indexOf(correct), explanation });
-      return true;
+    const nm = text.match(/\b(\d{1,3})\b(\s*(?:percent|%))?/);
+    if (nm) {
+      const v = parseInt(nm[1], 10);
+      const isPercent = !!nm[2];
+      let nv;
+      if (v < 10) nv = v + 2;
+      else if (isPercent || rand() < 0.5) nv = Math.max(1, Math.round(v * 0.6));
+      else nv = Math.round(v * 1.5);
+      const altered = text.replace(new RegExp("\\b" + nm[1] + "\\b"), String(nv));
+      if (!seen.has(altered.toLowerCase())) out.push({ text: altered, from: nm[1], to: String(nv) });
+    }
+    return out;
+  }
+  /** One plausible but wrong version of a statement (first available alteration). */
+  function alterStatement(text) { return alterAll(text)[0] || null; }
+  /** The subject of a statement (text before its main verb), if it is short enough to name. */
+  function subjectOf(text) {
+    const m = text.match(FACT_RE);
+    if (!m || m.index < 4) return null;
+    const subj = text.slice(0, m.index).trim().replace(/[,;:]$/, "");
+    if (/\d/.test(subj) || /^(approximately|about|most|many|some|several|patients?|it|this|these|those|there)\b/i.test(subj)) return null;
+    return subj.length >= 4 && subj.length <= 70 && subj.split(/\s+/).length <= 10 ? lowerFirst(subj) : null;
+  }
+
+  function buildQuizCandidates(a, L) {
+    const cands = [];
+    const facts = a.sentences.filter((s) => /[.!?]$/.test(s.text) && FACT_RE.test(s.text) && !OBJECTIVE_RE.test(s.text));
+    const add = (tpl, s, question, scenario, correct, wrongs, explanation) => {
+      const uniq = [];
+      wrongs.forEach((w) => { if (w && w.text && w.text.toLowerCase() !== correct.toLowerCase() && !uniq.some((u) => u.text.toLowerCase() === w.text.toLowerCase())) uniq.push(w); });
+      if (uniq.length < 3) return;
+      cands.push({ tpl, seg: s.seg, sIdx: s.index, question, scenario: scenario || "", correct, wrongs: uniq.slice(0, 3), explanation });
+    };
+    /** Wrong statements derived from other facts (each reversed on one key concept). */
+    const alteredFrom = (excludeIdx, count, prefer) => {
+      const out = [];
+      const pool = prefer ? prefer.concat(facts.filter((f) => !prefer.includes(f))) : shuffle(facts);
+      pool.forEach((s) => {
+        if (out.length >= count || excludeIdx.has(s.index)) return;
+        const alt = alterStatement(s.text);
+        if (alt) out.push({ text: stripEnd(alt.text), why: L.whyAltered(s.text), src: s.index });
+      });
+      return out;
+    };
+
+    // why / effect: rationale and consequences
+    const reasons = [];
+    const effects = [];
+    facts.forEach((s) => {
+      let m = s.text.match(CAUSE_RE);
+      if (m && m.index >= 15) {
+        const x = stripEnd(s.text.slice(0, m.index)).replace(/[,;]\s*$/, "");
+        const y = stripEnd(s.text.slice(m.index + m[0].length)).trim();
+        if (x.length >= 10 && y.length >= 10) reasons.push({ s, x, y });
+        return;
+      }
+      m = s.text.match(EFFECT_RE);
+      if (m && m.index >= 15) {
+        const x = stripEnd(s.text.slice(0, m.index)).replace(/[,;]\s*$/, "");
+        const y = stripEnd(s.text.slice(m.index + m[0].length)).trim();
+        if (x.length >= 10 && y.length >= 10) effects.push({ s, x, y });
+      }
+    });
+    const clausePool = reasons.concat(effects);
+    reasons.forEach((r) => {
+      let wrongs = shuffle(clausePool.filter((o) => o !== r)).slice(0, 3).map((o) => ({ text: o.y, why: L.whyOtherReason(o.x) }));
+      const alt = alterStatement(r.y);
+      if (alt) wrongs = [{ text: alt.text, why: L.whyAltered(r.s.text) }].concat(wrongs);
+      add("why", r.s, L.qWhy(lowerFirst(r.x)), "", r.y, wrongs, L.expCorrect(r.s.text));
+    });
+    effects.forEach((e) => {
+      let wrongs = shuffle(clausePool.filter((o) => o !== e)).slice(0, 3).map((o) => ({ text: o.y, why: L.whyOtherReason(o.x) }));
+      const alt = alterStatement(e.y);
+      if (alt) wrongs = [{ text: alt.text, why: L.whyAltered(e.s.text) }].concat(wrongs);
+      add("effect", e.s, L.qEffect(e.x), "", e.y, wrongs, L.expCorrect(e.s.text));
+    });
+
+    // sequence: progression through phases / stages
+    const phases = [];
+    facts.forEach((s) => {
+      const m = s.text.match(PHASE_RE);
+      if (!m) return;
+      const n = NUM_WORDS[m[2].toLowerCase()] || parseInt(m[2], 10);
+      if (phases.some((p) => p.n === n)) return;
+      const rest = s.text.slice(m.index + m[0].length);
+      const fm = rest.match(/\b(focuses on|focus on|introduces|involves|includes|emphasizes|emphasises|consists of|is the|requires|aims to|targets)\s+/i);
+      const focus = stripEnd(fm ? rest.slice(fm.index + fm[0].length) : rest.replace(/^[,\s]*(the\s+[^,]+,\s*)?/, ""));
+      if (focus.length >= 10) phases.push({ s, n, label: m[0], focus });
+    });
+    phases.sort((p, q) => p.n - q.n);
+    phases.forEach((p, i) => {
+      const next = phases[i + 1];
+      if (!next || next.n !== p.n + 1) return;
+      let wrongs = phases.filter((o) => o !== next).map((o) => ({ text: o.focus, why: L.whyPhase(o.label) }));
+      const alt = alterStatement(next.focus);
+      if (alt) wrongs.push({ text: alt.text, why: L.whyAltered(next.s.text) });
+      add("sequence", next.s, L.qSequence(p.label, p.focus), "", next.focus, shuffle(wrongs), L.expSequence(next.label, next.s.text));
+    });
+
+    // decision: clinical decision-making
+    const decisions = facts.filter((s) => DECISION_RE.test(s.text));
+    decisions.forEach((s) => {
+      const own = alterAll(s.text).slice(0, 1).map((v) => ({ text: stripEnd(v.text), why: L.whyAltered(s.text) }));
+      const wrongs = own.concat(alteredFrom(new Set([s.index]), 3 - own.length, shuffle(decisions)));
+      add("decision", s, L.qDecision, "", stripEnd(s.text), wrongs, L.expCorrect(s.text));
+    });
+
+    // match: distinguishing related concepts
+    const defs = a.defs.filter((d) => !d.abbr).map((d) => {
+      const m = d.definition.match(/\b(?:is|are)\s+(?:defined as\s+)?(.+)$/i);
+      return m ? { term: d.term, desc: stripEnd(m[1]), s: d.sentence } : null;
+    }).filter(Boolean);
+    if (defs.length >= 4) {
+      shuffle(defs).slice(0, 3).forEach((d) => {
+        const others = shuffle(defs.filter((o) => o !== d)).slice(0, 3);
+        if (others.length < 3) return;
+        // mismatch: each other term gets a different other term's description
+        const wrongs = others.map((o, i) => {
+          const wrongDesc = others[(i + 1) % others.length];
+          return { text: `${o.term} — ${shorten(wrongDesc.desc, 220)}`, why: L.whyMismatch(o.term, o.desc) };
+        });
+        add("match", d.s, L.qMatch, "", `${d.term} — ${shorten(d.desc, 220)}`, wrongs, L.expMatch(d.term, d.desc));
+      });
     }
 
-    // 1) Definition -> term questions
-    shuffle(a.defs.filter((d) => !d.abbr)).forEach((d) => {
-      if (questions.length >= Math.ceil(n / 2)) return;
-      if (usedSentences.has(d.sentence.index)) return;
-      const defText = d.definition.replace(new RegExp("\\b" + esc(d.term) + "\\b(\\s\\([A-Z]{2,6}\\))?", "gi"), "____");
-      const ok = push(`${L.qDefinition}\n"${defText}"`, d.term, distractors(d.term, termPool, 3), L.expDefinition(d.term, d.definition));
-      if (ok) usedSentences.add(d.sentence.index);
+    // threshold: interpreting a measured value against a criterion
+    facts.forEach((s) => {
+      const m = s.text.match(THRESH_RE);
+      if (!m) return;
+      const phrase = m[1].toLowerCase();
+      const n = NUM_WORDS[m[2].toLowerCase()] || parseFloat(m[2]);
+      if (!n) return;
+      const unit = m[3] ? (m[3] === "%" ? "percent" : m[3]) : "";
+      const atLeast = /at least|minimum|more than|greater than|above|over|not before/.test(phrase);
+      const step = Math.max(1, Math.round(n * 0.2));
+      const met = rand() < 0.5;
+      const v = atLeast ? (met ? n + step : n - step) : (met ? n - step : n + step);
+      const op = atLeast ? L.atLeast : L.atMost;
+      const opWrong = atLeast ? L.atMost : L.atLeast;
+      const correct = met ? L.optMet(op, n, unit) : L.optNotMet(op, n, unit);
+      const wrongs = [
+        { text: met ? L.optNotMet(op, n, unit) : L.optMet(op, n, unit), why: L.whyThresholdVerdict(v, n, unit) },
+        { text: met ? L.optNotMet(opWrong, n, unit) : L.optMet(opWrong, n, unit), why: L.whyThresholdDirection(m[0]) },
+        { text: met ? L.optMet(op, n + step * 2, unit) : L.optNotMet(op, Math.max(1, n - step * 2), unit), why: L.whyThresholdNumber(n, unit) },
+      ];
+      add("threshold", s, L.qThreshold(v, unit), s.text, correct, wrongs, L.expThreshold(v, unit, n, met));
     });
 
-    // 2) Numeric cloze questions
-    const numeric = a.sentences.filter((s) => /\b\d{1,3}\b/.test(s.text) && !usedSentences.has(s.index)).sort((x, y) => y.score - x.score);
-    numeric.forEach((s) => {
-      if (questions.length >= n - 2) return;
-      const m = s.text.match(/\b(\d{1,3})\b/);
-      const val = parseInt(m[1], 10);
-      const stem = s.text.replace(m[0], "____");
-      const alts = [...new Set([val + Math.max(1, Math.round(val * 0.5)), Math.max(0, val - Math.max(1, Math.round(val * 0.4))), val * 2 + 1, val + 5].filter((v) => v !== val))].map(String);
-      if (push(`${L.qNumber}\n"${stem}"`, String(val), alts.slice(0, 3), L.expCloze(s.text))) usedSentences.add(s.index);
+    // statement: identify the correct statement among near-identical variants
+    // (variants of the same statement first, so the correct one cannot be spotted by wording alone)
+    facts.forEach((s) => {
+      if (reasons.some((r) => r.s === s) || phases.some((p) => p.s === s)) return;
+      const own = shuffle(alterAll(s.text)).slice(0, 2).map((v) => ({ text: stripEnd(v.text), why: L.whyAltered(s.text) }));
+      const wrongs = own.concat(alteredFrom(new Set([s.index]), 3 - own.length));
+      const subject = own.length >= 1 ? subjectOf(s.text) : null;
+      add("statement", s, subject ? L.qStatementAbout(subject) : L.qStatement, "", stripEnd(s.text), wrongs, L.expCorrect(s.text));
     });
 
-    // 3) Term cloze questions from high-scoring sentences
-    const clozeSentences = a.sentences.slice().sort((x, y) => y.score - x.score);
-    clozeSentences.forEach((s) => {
-      if (questions.length >= n - 1) return;
-      if (usedSentences.has(s.index)) return;
-      const term = termPool.find((t) => new RegExp("\\b" + esc(t) + "\\b", "i").test(s.text) && !s.text.toLowerCase().startsWith(t.toLowerCase()));
-      if (!term) return;
-      const stem = s.text.replace(new RegExp("\\b" + esc(term) + "\\b(\\s\\([A-Z]{2,6}\\))?", "i"), "____");
-      if (push(`${L.qCloze}\n"${stem}"`, term, distractors(term, termPool, 3), L.expCloze(s.text))) usedSentences.add(s.index);
-    });
+    // term: label a described finding (low priority filler)
+    if (defs.length >= 4) {
+      defs.forEach((d) => {
+        const desc = d.desc.replace(new RegExp("\\b" + esc(d.term) + "\\b", "gi"), "this");
+        const wrongs = shuffle(defs.filter((o) => o !== d)).slice(0, 3).map((o) => ({ text: o.term, why: L.whyOtherTerm(o.term, o.desc) }));
+        add("term", d.s, L.qTerm(desc), "", d.term, wrongs, L.expMatch(d.term, d.desc));
+      });
+    }
+    return cands;
+  }
 
-    // 4) Concept recognition (fills remaining slots)
-    const lower = lecture.text.toLowerCase();
-    const foreign = PT_DISTRACTORS.filter((d) => !lower.includes(d.toLowerCase()));
-    shuffle(a.concepts).forEach((c) => {
-      if (questions.length >= n) return;
-      push(L.qConcept, c.title, shuffle(foreign).slice(0, 3), L.expConcept(c.title));
-    });
+  const TEMPLATE_PRIORITY = { why: 0, effect: 0, sequence: 0, decision: 1, match: 1, threshold: 2, statement: 3, term: 5 };
 
-    return { questions: shuffle(questions).slice(0, n) };
+  /** Picks questions round-robin across the selected slides, favouring reasoning templates and variety. */
+  function selectQuestions(cands, target) {
+    const bySeg = {};
+    cands.forEach((c) => { (bySeg[c.seg] = bySeg[c.seg] || []).push(c); });
+    const segs = Object.keys(bySeg).map(Number).sort((x, y) => x - y);
+    const usedSentence = new Set();
+    const usedCorrect = new Set();
+    const usedTpl = {};
+    const picked = [];
+    for (let round = 0; round < 50 && picked.length < target; round++) {
+      let progressed = false;
+      for (const seg of segs) {
+        if (picked.length >= target) break;
+        const pool = bySeg[seg].filter((c) => !c.done && !usedSentence.has(c.sIdx) && !usedCorrect.has(c.correct.toLowerCase()));
+        if (!pool.length) continue;
+        pool.sort((x, y) => (TEMPLATE_PRIORITY[x.tpl] + (usedTpl[x.tpl] || 0) * 0.6) - (TEMPLATE_PRIORITY[y.tpl] + (usedTpl[y.tpl] || 0) * 0.6));
+        const c = pool[0];
+        c.done = true;
+        usedSentence.add(c.sIdx);
+        usedCorrect.add(c.correct.toLowerCase());
+        usedTpl[c.tpl] = (usedTpl[c.tpl] || 0) + 1;
+        picked.push(c);
+        progressed = true;
+      }
+      if (!progressed) break;
+    }
+    return picked;
+  }
+
+  /**
+   * opts.slideIndexes – indexes of the selected slides (null/empty = all)
+   * opts.count        – desired number of questions (capped by available content)
+   */
+  async function quiz(lecture, lang, opts) {
+    await delay(900 + Math.random() * 600);
+    const L = QUIZ_FRAMES[lang] || QUIZ_FRAMES.en;
+    const o = opts || {};
+    const a = analyzeText(lecture, o.slideIndexes);
+    seed = hash((lecture.id || "") + (o.slideIndexes || []).join(",") + Date.now().toString());
+    const cfg = window.APP_CONFIG;
+    const target = Math.max(cfg.quizMinQuestions || 3, Math.min(cfg.quizMaxQuestions || 12, o.count || cfg.quizCountFor(a.sentences.length ? (o.slideIndexes || window.Parsers.segments(lecture)).length : 0)));
+    const picked = selectQuestions(buildQuizCandidates(a, L), target);
+    const questions = picked.map((c) => {
+      const items = shuffle([{ text: c.correct, why: "" }].concat(c.wrongs));
+      return {
+        type: c.tpl,
+        slide: c.seg,
+        scenario: c.scenario,
+        question: c.question,
+        options: items.map((i) => i.text),
+        answerIndex: items.findIndex((i) => i.text === c.correct),
+        explanation: c.explanation,
+        whyOthers: items.map((i) => i.why),
+      };
+    });
+    return { questions };
   }
 
   async function clinicalCase(lecture, lang) {

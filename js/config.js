@@ -10,5 +10,8 @@ window.APP_CONFIG = {
   aiProvider: "mock",
   apiEndpoint: "http://localhost:3000/api/ai",
   maxStoredChars: 200000,
-  quizQuestions: 6,
+  // Quiz length scales with the amount of selected content (slides/pages).
+  quizMinQuestions: 3,
+  quizMaxQuestions: 12,
+  quizCountFor: (slideCount) => Math.max(3, Math.min(12, Math.round(2 + slideCount * 0.9))),
 };

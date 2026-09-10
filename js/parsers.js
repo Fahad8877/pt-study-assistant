@@ -29,7 +29,7 @@
       });
       pages.push(text.trim());
     }
-    return { text: pages.join("\n\n"), units: pdf.numPages, unitType: "pages" };
+    return { text: pages.join("\n\n"), parts: pages, units: pdf.numPages, unitType: "pages" };
   }
 
   function decodeXml(s) {
@@ -62,7 +62,26 @@
       const xml = await zip.file(name).async("string");
       slides.push(slideXmlToText(xml));
     }
-    return { text: slides.join("\n\n"), units: slides.length, unitType: "slides" };
+    return { text: slides.join("\n\n"), parts: slides, units: slides.length, unitType: "slides" };
+  }
+
+  /**
+   * Splits a lecture into its slides/pages. Uses the stored per-unit text when
+   * available, otherwise falls back to blank-line separated blocks.
+   * Returns [{ index, number, title, text }].
+   */
+  function segments(lecture) {
+    let parts;
+    if (Array.isArray(lecture.segments) && lecture.segments.length) {
+      parts = lecture.segments.map((s) => ({ number: s.number, text: s.text }));
+    } else {
+      parts = (lecture.text || "").split(/\n\s*\n/).map((t) => t.trim()).filter(Boolean).map((t, i) => ({ number: i + 1, text: t }));
+    }
+    return parts.map((p, index) => {
+      const firstLine = p.text.split("\n")[0].trim();
+      const title = firstLine.length <= 70 ? firstLine : firstLine.slice(0, 60).replace(/\s+\S*$/, "") + "…";
+      return { index, number: p.number, title, text: p.text };
+    });
   }
 
   async function parseFile(file) {
@@ -92,5 +111,5 @@
       .trim();
   }
 
-  window.Parsers = { parseFile, detectType, titleFromFilename, normalize };
+  window.Parsers = { parseFile, detectType, titleFromFilename, normalize, segments };
 })();

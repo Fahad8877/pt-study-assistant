@@ -122,7 +122,7 @@
       const parsed = await window.Parsers.parseFile(file);
       await createLecture({
         title: window.Parsers.titleFromFilename(file.name),
-        fileName: file.name, fileType: parsed.fileType, units: parsed.units, unitType: parsed.unitType, text: parsed.text,
+        fileName: file.name, fileType: parsed.fileType, units: parsed.units, unitType: parsed.unitType, text: parsed.text, parts: parsed.parts,
       });
     } catch (err) {
       console.error(err);
@@ -135,10 +135,14 @@
     const status = document.getElementById("upload-status");
     if (status) status.innerHTML = spinner(t("upload.analyzing"));
     const text = data.text.slice(0, window.APP_CONFIG.maxStoredChars);
+    // Keep each slide/page separately so quizzes can be scoped to specific slides.
+    const segments = Array.isArray(data.parts)
+      ? data.parts.map((p, i) => ({ number: i + 1, text: window.Parsers.normalize(p || "") })).filter((s) => s.text)
+      : undefined;
     const lecture = {
       id: window.Store.newId(),
       title: data.title, fileName: data.fileName, fileType: data.fileType,
-      units: data.units, unitType: data.unitType, text,
+      units: data.units, unitType: data.unitType, text, segments,
       wordCount: (text.match(/\S+/g) || []).length,
       createdAt: Date.now(),
     };
@@ -243,21 +247,145 @@
   }
 
   /* ---------- quiz ---------- */
-  let quiz = null;
+  let quiz = null;            // active quiz: { lectureId, lang, scope, questions, index, selected, checked, score }
+  const quizSetup = {};       // remembered scope choice per lecture: { mode: "all"|"some", slides: number[] }
+
+  function unitLabel(lecture, plural) {
+    const slides = lecture.unitType !== "pages";
+    if (plural) return t(slides ? "quiz.slidesUnit" : "quiz.pagesUnit");
+    return t(slides ? "quiz.slide" : "quiz.page");
+  }
+  function fill(key, vars) {
+    return Object.keys(vars).reduce((s, k) => s.replace(new RegExp("\\{" + k + "\\}", "g"), vars[k]), t(key));
+  }
+
   async function renderQuiz(id) {
     if (!id) return renderPicker("quiz.title", "quiz.subtitle", "quiz.choose", "quiz.noLectures", "#/quiz");
     const lecture = window.Store.get(id);
     if (!lecture) return renderPicker("quiz.title", "quiz.subtitle", "quiz.choose", "quiz.noLectures", "#/quiz");
     window.Store.setLastId(id);
 
-    if (!quiz || quiz.lectureId !== id || quiz.lang !== window.I18N.lang) {
-      const token = ++renderToken;
-      const lang = window.I18N.lang;
-      view.innerHTML = `<div class="page-header"><h1>${esc(t("quiz.title"))}</h1><p>${esc(lecture.title)}</p></div><div class="card">${spinner(t("quiz.generating"))}</div>`;
-      const data = await window.AI.quiz(lecture);
-      if (token !== renderToken) return; // user navigated or switched language meanwhile
-      quiz = { lectureId: id, lang, questions: data.questions, index: 0, selected: null, checked: false, score: 0 };
+    if (quiz && quiz.lectureId === id && quiz.questions) {
+      if (quiz.lang === window.I18N.lang) return drawQuiz(lecture);
+      return startQuiz(lecture, quiz.scope); // language changed: regenerate with the same scope
     }
+    renderQuizSetup(lecture);
+  }
+
+  function quizHeader(lecture) {
+    return `<div class="page-header"><h1>${esc(t("quiz.title"))}</h1><p>${esc(lecture.title)}</p></div>`;
+  }
+
+  function renderQuizSetup(lecture) {
+    const segs = window.Parsers.segments(lecture);
+    const setup = quizSetup[lecture.id] || (quizSetup[lecture.id] = { mode: "all", slides: segs.map((s) => s.index) });
+    const cfg = window.APP_CONFIG;
+
+    const slideItems = segs.map((s) => `
+      <label class="slide-pick ${setup.slides.includes(s.index) ? "checked" : ""}">
+        <input type="checkbox" data-seg="${s.index}" ${setup.slides.includes(s.index) ? "checked" : ""} />
+        <span dir="auto"><strong>${esc(unitLabel(lecture))} ${s.number}</strong> · ${esc(s.title)}</span>
+      </label>`).join("");
+
+    view.innerHTML = `
+      ${quizHeader(lecture)}
+      <div class="card">
+        <h2>${esc(t("quiz.scopeTitle"))}</h2>
+        <p class="muted">${esc(t("quiz.scopeHint"))}</p>
+        <div class="options scope-options">
+          <button type="button" class="option ${setup.mode === "all" ? "selected" : ""}" data-scope="all">
+            <span class="letter">${setup.mode === "all" ? "●" : "○"}</span>
+            <span><strong>${esc(t("quiz.scopeAll"))}</strong><span class="muted small">${esc(t("quiz.scopeAllDesc"))} (${segs.length} ${esc(unitLabel(lecture, true))})</span></span>
+          </button>
+          <button type="button" class="option ${setup.mode === "some" ? "selected" : ""}" data-scope="some">
+            <span class="letter">${setup.mode === "some" ? "●" : "○"}</span>
+            <span><strong>${esc(t("quiz.scopeSome"))}</strong><span class="muted small">${esc(t("quiz.scopeSomeDesc"))}</span></span>
+          </button>
+        </div>
+        <div id="slide-picker" ${setup.mode === "some" ? "" : "hidden"}>
+          <div class="slide-list-head">
+            <span class="muted small" id="selected-count"></span>
+            <span>
+              <button type="button" class="btn btn-ghost" id="select-all">${esc(t("quiz.selectAll"))}</button>
+              <button type="button" class="btn btn-ghost" id="select-none">${esc(t("quiz.clearAll"))}</button>
+            </span>
+          </div>
+          <div class="slide-list">${slideItems}</div>
+        </div>
+        <p class="muted small" id="count-preview" style="margin-top:1rem"></p>
+        <div id="quiz-status"></div>
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary" id="start-quiz">${esc(t("quiz.start"))}</button>
+          <a class="btn btn-ghost" href="#/lecture/${lecture.id}">${esc(t("quiz.backToLecture"))}</a>
+        </div>
+      </div>`;
+
+    const picker = document.getElementById("slide-picker");
+    const preview = document.getElementById("count-preview");
+    const selectedCount = document.getElementById("selected-count");
+    const startBtn = document.getElementById("start-quiz");
+
+    function chosen() { return setup.mode === "all" ? segs.map((s) => s.index) : setup.slides; }
+    function refresh() {
+      const n = chosen().length;
+      preview.textContent = n ? fill("quiz.countPreview", { n: cfg.quizCountFor(n) }) : t("quiz.noSlides");
+      selectedCount.textContent = fill("quiz.selectedCount", { n: setup.slides.length, m: segs.length });
+      startBtn.disabled = n === 0;
+      view.querySelectorAll(".slide-pick").forEach((l) => l.classList.toggle("checked", l.querySelector("input").checked));
+    }
+
+    view.querySelectorAll("[data-scope]").forEach((b) => b.addEventListener("click", () => {
+      setup.mode = b.getAttribute("data-scope");
+      view.querySelectorAll("[data-scope]").forEach((x) => {
+        const active = x === b;
+        x.classList.toggle("selected", active);
+        x.querySelector(".letter").textContent = active ? "●" : "○";
+      });
+      picker.hidden = setup.mode !== "some";
+      refresh();
+    }));
+    view.querySelectorAll("[data-seg]").forEach((cb) => cb.addEventListener("change", () => {
+      setup.slides = [...view.querySelectorAll("[data-seg]:checked")].map((x) => +x.getAttribute("data-seg"));
+      refresh();
+    }));
+    document.getElementById("select-all").addEventListener("click", () => {
+      view.querySelectorAll("[data-seg]").forEach((cb) => { cb.checked = true; });
+      setup.slides = segs.map((s) => s.index);
+      refresh();
+    });
+    document.getElementById("select-none").addEventListener("click", () => {
+      view.querySelectorAll("[data-seg]").forEach((cb) => { cb.checked = false; });
+      setup.slides = [];
+      refresh();
+    });
+    startBtn.addEventListener("click", () => {
+      const slides = chosen();
+      if (!slides.length) { toast(t("quiz.noSlides")); return; }
+      startQuiz(lecture, { mode: setup.mode, slides: slides.slice(), total: segs.length });
+    });
+    refresh();
+  }
+
+  async function startQuiz(lecture, scope) {
+    const token = ++renderToken;
+    const lang = window.I18N.lang;
+    const all = scope.mode === "all" || scope.slides.length >= scope.total;
+    view.innerHTML = `${quizHeader(lecture)}<div class="card">${spinner(t("quiz.generating"))}</div>`;
+    let data;
+    try {
+      data = await window.AI.quiz(lecture, { slideIndexes: all ? null : scope.slides, count: window.APP_CONFIG.quizCountFor(scope.slides.length) });
+    } catch (err) {
+      console.error(err);
+      data = { questions: [] };
+    }
+    if (token !== renderToken) return; // user navigated or switched language meanwhile
+    if (!data.questions || !data.questions.length) {
+      quiz = null;
+      renderQuizSetup(lecture);
+      document.getElementById("quiz-status").innerHTML = `<div class="alert alert-error">${esc(t("quiz.notEnough"))}</div>`;
+      return;
+    }
+    quiz = { lectureId: lecture.id, lang, scope, questions: data.questions, index: 0, selected: null, checked: false, score: 0 };
     drawQuiz(lecture);
   }
 
@@ -267,7 +395,6 @@
     if (!q || quiz.index >= total) return drawQuizResult(lecture);
 
     const pct = Math.round((quiz.index / total) * 100);
-    const parts = q.question.split("\n");
     const options = q.options.map((o, i) => {
       let cls = "option";
       if (quiz.checked) { if (i === q.answerIndex) cls += " correct"; else if (i === quiz.selected) cls += " wrong"; }
@@ -275,21 +402,23 @@
       return `<button class="${cls}" data-opt="${i}" ${quiz.checked ? "disabled" : ""}><span class="letter">${letter(i)}</span><span dir="auto">${esc(o)}</span></button>`;
     }).join("");
     const isCorrect = quiz.checked && quiz.selected === q.answerIndex;
+    const others = (q.whyOthers || []).map((w, i) => (i === q.answerIndex || !w) ? "" : `<li dir="auto"><strong>${letter(i)}.</strong> ${esc(w)}</li>`).join("");
     const feedback = quiz.checked ? `
       <div class="feedback ${isCorrect ? "ok" : "bad"}">
         <strong>${esc(isCorrect ? t("quiz.correct") : t("quiz.incorrect"))}</strong>
-        ${isCorrect ? "" : `<div>${esc(t("quiz.correctAnswer"))} <b>${esc(q.options[q.answerIndex])}</b></div>`}
-        <div class="small" style="margin-top:.4rem"><em>${esc(t("quiz.explanation"))}:</em> ${esc(q.explanation)}</div>
+        ${isCorrect ? "" : `<div>${esc(t("quiz.correctAnswer"))} <b dir="auto">${esc(q.options[q.answerIndex])}</b></div>`}
+        <div class="small" style="margin-top:.4rem" dir="auto"><em>${esc(t("quiz.explanation"))}:</em> ${esc(q.explanation)}</div>
+        ${others ? `<div class="small" style="margin-top:.6rem"><em>${esc(t("quiz.whyOthers"))}:</em><ul class="why-others">${others}</ul></div>` : ""}
       </div>` : "";
     const last = quiz.index === total - 1;
 
     view.innerHTML = `
-      <div class="page-header"><h1>${esc(t("quiz.title"))}</h1><p>${esc(lecture.title)}</p></div>
+      ${quizHeader(lecture)}
       <div class="card">
         <div class="progress-bar"><span style="width:${pct}%"></span></div>
         <div class="question-count">${esc(t("quiz.question"))} ${quiz.index + 1} ${esc(t("quiz.of"))} ${total}</div>
-        <div class="question-text">${esc(parts[0])}</div>
-        ${parts[1] ? `<p dir="auto"><em>${esc(parts[1])}</em></p>` : ""}
+        ${q.scenario ? `<div class="scenario" dir="auto">${esc(q.scenario)}</div>` : ""}
+        <div class="question-text" dir="auto">${esc(q.question)}</div>
         <div class="options">${options}</div>
         ${feedback}
         <div class="btn-row">
@@ -304,7 +433,7 @@
     const check = document.getElementById("check");
     if (check) check.addEventListener("click", () => { quiz.checked = true; if (quiz.selected === q.answerIndex) quiz.score++; drawQuiz(lecture); });
     const next = document.getElementById("next");
-    if (next) next.addEventListener("click", () => { quiz.index++; quiz.selected = null; quiz.checked = false; drawQuiz(lecture); });
+    if (next) next.addEventListener("click", () => { quiz.index++; quiz.selected = null; quiz.checked = false; drawQuiz(lecture); window.scrollTo(0, 0); });
   }
 
   function drawQuizResult(lecture) {
@@ -312,18 +441,20 @@
     const ratio = total ? quiz.score / total : 0;
     const msg = ratio >= 0.8 ? t("quiz.great") : ratio >= 0.5 ? t("quiz.good") : t("quiz.weak");
     view.innerHTML = `
-      <div class="page-header"><h1>${esc(t("quiz.title"))}</h1><p>${esc(lecture.title)}</p></div>
+      ${quizHeader(lecture)}
       <div class="card score">
         <div class="muted">${esc(t("quiz.result"))}</div>
         <div class="big">${quiz.score} / ${total}</div>
         <p>${esc(msg)}</p>
         <div class="btn-row" style="justify-content:center">
           <button class="btn btn-primary" id="retry">${esc(t("quiz.retry"))}</button>
+          <button class="btn btn-secondary" id="change-scope">${esc(t("quiz.changeScope"))}</button>
           <a class="btn btn-secondary" href="#/case/${lecture.id}">${esc(t("quiz.goCase"))}</a>
           <a class="btn btn-ghost" href="#/lecture/${lecture.id}">${esc(t("quiz.backToLecture"))}</a>
         </div>
       </div>`;
-    document.getElementById("retry").addEventListener("click", () => { quiz = null; renderQuiz(lecture.id); });
+    document.getElementById("retry").addEventListener("click", () => startQuiz(lecture, quiz.scope));
+    document.getElementById("change-scope").addEventListener("click", () => { quiz = null; renderQuizSetup(lecture); });
   }
 
   /* ---------- clinical case ---------- */
