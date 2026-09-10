@@ -46,7 +46,20 @@ js/app.js               Views, upload flow, quiz and clinical case logic
 server-example/server.js  Example Node backend using the Claude API
 ```
 
-## Connecting a real AI API (multimodal, three modules)
+## Connecting a real AI model
+
+### Option 1 — from the browser (no backend, works on GitHub Pages)
+
+Open **AI Settings** in the app, paste an Anthropic API key (create one at
+https://console.anthropic.com/), choose a model and click **Save**. The app then calls the
+Claude API directly from the browser (`js/ai/browser.js`) with the same system prompt,
+three-module structure, structured outputs and page/figure images as the backend below.
+
+- The key is stored only in that browser (`localStorage`) and sent only to `api.anthropic.com`.
+- Each person who uses the site enters their own key; visitors without a key see demo mode.
+- If a request fails (invalid key, network), the app shows a message and falls back to demo content.
+
+### Option 2 — through a backend (multimodal, three modules)
 
 The UI only talks to `window.AI` (`analyze`, `quiz`, `clinicalCase`). Providers live in
 `js/ai/`. The built-in mock works offline; the API provider sends the parsed document to

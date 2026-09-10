@@ -723,6 +723,37 @@ html[dir="rtl"] .vignette h4 { letter-spacing: 0; text-transform: none; font-siz
 .vignette ol { padding-inline-start: 1.2rem; margin: 0; }
 @media (max-width: 600px) { .case-field { grid-template-columns: 1fr; gap: 0.15rem; } }
 
+/* AI settings */
+.icon-btn { display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; color: var(--muted); border: 1px solid var(--border); background: var(--surface); }
+.icon-btn svg { width: 20px; height: 20px; }
+.icon-btn:hover, .icon-btn.active { color: var(--primary); border-color: var(--primary-soft-2); background: var(--primary-soft); }
+.topbar-settings { display: none; }
+.form { display: grid; gap: 1.1rem; margin-top: 1rem; }
+.field { display: grid; gap: 0.35rem; }
+.field > span { font-weight: 600; font-size: 0.92rem; }
+.field input, .field select {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.field input:focus, .field select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.input-row { display: flex; gap: 0.5rem; }
+.input-row input { flex: 1; min-width: 0; direction: ltr; }
+.check { display: flex; align-items: flex-start; gap: 0.6rem; font-size: 0.95rem; }
+.check input { margin-top: 0.3rem; accent-color: var(--primary); }
+.status-row { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.8rem; border-radius: 999px; background: var(--bg); color: var(--muted); font-size: 0.9rem; }
+.status-row .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--border-strong); }
+.status-row.on { background: var(--accent-soft); color: var(--accent); }
+.status-row.on .dot { background: var(--accent); }
+.alert-ok { background: var(--accent-soft); color: var(--accent); }
+.steps { padding-inline-start: 1.3rem; margin: 0.5rem 0 0.75rem; }
+.steps li { margin-bottom: 0.45rem; }
+@media (max-width: 860px) { .topbar-settings { display: inline-grid; } }
+
 details.source { margin-top: 1.5rem; }
 details.source summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
 details.source .lecture-content { margin-top: 0.75rem; }

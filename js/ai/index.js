@@ -4,6 +4,10 @@
  */
 (function () {
   function provider() {
+    // An API key entered in Settings enables the in-browser Claude provider on any host;
+    // otherwise the configured provider ("mock" or a backend "api") is used.
+    const b = window.AIProviders.browser;
+    if (b && b.isConfigured() && window.APP_CONFIG.aiProvider !== "api") return b;
     const name = window.APP_CONFIG.aiProvider;
     return window.AIProviders[name] || window.AIProviders.mock;
   }
@@ -16,6 +20,7 @@
     } catch (err) {
       if (p !== window.AIProviders.mock) {
         console.warn("AI provider failed, falling back to mock:", err);
+        document.dispatchEvent(new CustomEvent("aierror", { detail: { message: String(err.message || err), status: err.status } }));
         return window.AIProviders.mock[method](lecture, lang, opts);
       }
       throw err;

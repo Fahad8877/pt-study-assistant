@@ -23,7 +23,10 @@
   }
   function navigate(hash) { location.hash = hash; }
   function letter(i) { return window.I18N.lang === "ar" ? ["أ", "ب", "ج", "د"][i] : ["A", "B", "C", "D"][i]; }
-  function mockNote() { return window.AI.isMock() ? `<p class="note">${esc(t("common.mockNote"))}</p>` : ""; }
+  function mockNote() {
+    if (!window.AI.isMock()) return "";
+    return `<p class="note">${esc(t("common.mockNote"))} <a href="#/settings">${esc(t("settings.connectLink"))}</a></p>`;
+  }
   function lectureMeta(l) {
     const unit = l.unitType === "slides" ? t("lectures.slides") : t("lectures.pages");
     return `${l.units} ${unit} · ${l.wordCount} ${t("lectures.words")} · ${formatDate(l.createdAt)}`;
@@ -725,6 +728,86 @@
     </div>`;
   }
 
+  /* ---------- AI settings (in-browser Claude provider) ---------- */
+  function renderSettings() {
+    const b = window.AIProviders.browser;
+    const st = b.settings();
+    const models = [
+      ["claude-opus-5", "Claude Opus 5"],
+      ["claude-sonnet-5", "Claude Sonnet 5"],
+      ["claude-fable-5-1", "Claude Fable 5.1"],
+      ["claude-sonnet-4-6", "Claude Sonnet 4.6"],
+      ["claude-haiku-4-5", "Claude Haiku 4.5"],
+    ];
+    const connected = b.isConfigured();
+    view.innerHTML = `
+      <div class="page-header"><h1>${esc(t("settings.title"))}</h1><p>${esc(t("settings.subtitle"))}</p></div>
+      <div class="card">
+        <div class="status-row ${connected ? "on" : ""}"><span class="dot"></span><span>${esc(connected ? t("settings.statusOn") : t("settings.statusOff"))}</span></div>
+        <form id="ai-form" class="form" autocomplete="off">
+          <label class="field">
+            <span>${esc(t("settings.apiKey"))}</span>
+            <div class="input-row">
+              <input type="password" id="api-key" value="${esc(st.apiKey)}" placeholder="sk-ant-…" spellcheck="false" autocomplete="off" />
+              <button type="button" class="btn btn-secondary" id="toggle-key">${esc(t("settings.show"))}</button>
+            </div>
+            <small class="muted">${esc(t("settings.apiKeyHelp"))}</small>
+          </label>
+          <label class="field">
+            <span>${esc(t("settings.model"))}</span>
+            <select id="ai-model">${models.map(([v, l]) => `<option value="${v}" ${v === st.model ? "selected" : ""}>${l}</option>`).join("")}</select>
+            <small class="muted">${esc(t("settings.modelHelp"))}</small>
+          </label>
+          <label class="check"><input type="checkbox" id="ai-images" ${st.sendImages ? "checked" : ""} /> <span>${esc(t("settings.sendImages"))}</span></label>
+          <div id="ai-status"></div>
+          <div class="btn-row">
+            <button type="submit" class="btn btn-primary">${esc(t("settings.save"))}</button>
+            <button type="button" class="btn btn-secondary" id="ai-test">${esc(t("settings.test"))}</button>
+            <button type="button" class="btn btn-danger" id="ai-clear">${esc(t("settings.clear"))}</button>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <h3>${esc(t("settings.howTitle"))}</h3>
+        <ol class="steps">
+          <li>${esc(t("settings.how1"))} <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a></li>
+          <li>${esc(t("settings.how2"))}</li>
+          <li>${esc(t("settings.how3"))}</li>
+        </ol>
+        <p class="muted small">${esc(t("settings.privacy"))}</p>
+      </div>`;
+
+    const status = document.getElementById("ai-status");
+    const keyInput = document.getElementById("api-key");
+    document.getElementById("toggle-key").addEventListener("click", () => {
+      keyInput.type = keyInput.type === "password" ? "text" : "password";
+    });
+    document.getElementById("ai-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      b.saveSettings({ apiKey: keyInput.value.trim(), model: document.getElementById("ai-model").value, sendImages: document.getElementById("ai-images").checked });
+      toast(t("settings.saved"));
+      renderSettings();
+    });
+    document.getElementById("ai-test").addEventListener("click", async () => {
+      b.saveSettings({ apiKey: keyInput.value.trim(), model: document.getElementById("ai-model").value, sendImages: document.getElementById("ai-images").checked });
+      if (!b.isConfigured()) { status.innerHTML = `<div class="alert alert-error">${esc(t("settings.noKey"))}</div>`; return; }
+      status.innerHTML = spinner(t("settings.testing"));
+      try { await b.testConnection(); status.innerHTML = `<div class="alert alert-ok">${esc(t("settings.testOk"))}</div>`; }
+      catch (err) { status.innerHTML = `<div class="alert alert-error">${esc(t("settings.testFail"))} ${esc(err.message)}</div>`; }
+    });
+    document.getElementById("ai-clear").addEventListener("click", () => {
+      b.saveSettings({ apiKey: "" });
+      toast(t("settings.cleared"));
+      renderSettings();
+    });
+  }
+
+  document.addEventListener("aierror", (e) => {
+    const d = e.detail || {};
+    toast((d.status === 401 ? t("settings.errAuth") : t("settings.errGeneric")) + (d.message ? " — " + d.message.slice(0, 120) : ""));
+  });
+  if (window.AIProviders.browser) window.AIProviders.browser.onProgress((s) => { if (s.phase === "generating") toast(t("settings.generating")); });
+
   /* ---------- router ---------- */
   let renderToken = 0; // invalidates in-flight async renders on navigation / language change
   function route() {
@@ -746,6 +829,7 @@
       case "lecture": return renderLecture(id);
       case "quiz": return renderQuiz(id);
       case "case": return renderCase(id);
+      case "settings": return renderSettings();
       default: return renderDashboard();
     }
   }

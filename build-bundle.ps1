@@ -10,7 +10,7 @@ $bodyStart = $html.IndexOf("<body>") + 6
 $bodyEnd = $html.IndexOf("<!-- Third-party")
 $body = $html.Substring($bodyStart, $bodyEnd - $bodyStart).Trim()
 
-$scripts = @("js/config.js", "js/i18n.js", "js/storage.js", "js/parsers.js", "js/sample-lecture.js", "js/ai/mock.js", "js/ai/api.js", "js/ai/index.js", "js/app.js")
+$scripts = @("js/config.js", "js/i18n.js", "js/storage.js", "js/parsers.js", "js/sample-lecture.js", "js/ai/mock.js", "js/ai/api.js", "js/ai/browser.js", "js/ai/index.js", "js/app.js")
 $inline = ($scripts | ForEach-Object { "<script>`n" + (Get-Content (Join-Path $Root $_) -Raw -Encoding UTF8) + "`n</script>" }) -join "`n"
 
 $out = @"
