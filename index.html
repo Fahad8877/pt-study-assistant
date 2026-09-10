@@ -10,25 +10,59 @@
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <a href="#/" class="brand">
-      <span class="brand-mark">PT</span>
-      <span class="brand-name" data-i18n="app.name">PT Study Assistant</span>
-    </a>
-    <nav class="nav" id="main-nav">
-      <a href="#/" data-route="dashboard" data-i18n="nav.dashboard">Dashboard</a>
-      <a href="#/upload" data-route="upload" data-i18n="nav.upload">Upload</a>
-      <a href="#/lectures" data-route="lectures" data-i18n="nav.lectures">My Lectures</a>
-      <a href="#/quiz" data-route="quiz" data-i18n="nav.quiz">Quiz</a>
-      <a href="#/case" data-route="case" data-i18n="nav.case">Clinical Case</a>
-    </nav>
-    <div class="lang-switch" role="group" aria-label="Language">
-      <button type="button" data-lang="en" class="active">EN</button>
-      <button type="button" data-lang="ar">عربي</button>
-    </div>
-  </header>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+    <symbol id="i-quiz" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></symbol>
+    <symbol id="i-case" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6 6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3"/><path d="M8 15v1a6 6 0 0 0 6 6 6 6 0 0 0 6-6v-4"/><circle cx="20" cy="10" r="2"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="14" y2="17"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></symbol>
+  </svg>
 
-  <main id="view" class="view"></main>
+  <div class="app">
+    <aside class="sidebar">
+      <a href="#/" class="brand">
+        <span class="brand-mark">PT</span>
+        <span class="brand-text">
+          <span class="brand-name" data-i18n="app.name">PT Study Assistant</span>
+          <span class="brand-tagline" data-i18n="app.tagline">Learn · Understand · Apply</span>
+        </span>
+      </a>
+      <nav class="nav" id="main-nav" aria-label="Main">
+        <a href="#/" data-route="dashboard"><svg><use href="#i-home"/></svg><span data-i18n="nav.dashboard">Home</span></a>
+        <a href="#/upload" data-route="upload"><svg><use href="#i-upload"/></svg><span data-i18n="nav.upload">Upload Lecture</span></a>
+        <a href="#/lectures" data-route="lectures"><svg><use href="#i-book"/></svg><span data-i18n="nav.lectures">My Lectures</span></a>
+        <a href="#/quiz" data-route="quiz"><svg><use href="#i-quiz"/></svg><span data-i18n="nav.quiz">Quiz</span></a>
+        <a href="#/case" data-route="case"><svg><use href="#i-case"/></svg><span data-i18n="nav.case">Clinical Case</span></a>
+      </nav>
+      <div class="sidebar-foot" data-i18n="app.foot">Master of Physical Therapy</div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <a href="#/" class="brand">
+          <span class="brand-mark">PT</span>
+          <span class="brand-text"><span class="brand-name" data-i18n="app.name">PT Study Assistant</span></span>
+        </a>
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button type="button" data-lang="en" class="active">EN</button>
+          <button type="button" data-lang="ar">عربي</button>
+        </div>
+      </header>
+
+      <main id="view" class="view"></main>
+    </div>
+  </div>
+
+  <nav class="bottom-nav" aria-label="Main">
+    <a href="#/" data-route="dashboard"><svg><use href="#i-home"/></svg><span data-i18n="nav.short.dashboard">Home</span></a>
+    <a href="#/upload" data-route="upload"><svg><use href="#i-upload"/></svg><span data-i18n="nav.short.upload">Upload</span></a>
+    <a href="#/lectures" data-route="lectures"><svg><use href="#i-book"/></svg><span data-i18n="nav.short.lectures">Lectures</span></a>
+    <a href="#/quiz" data-route="quiz"><svg><use href="#i-quiz"/></svg><span data-i18n="nav.short.quiz">Quiz</span></a>
+    <a href="#/case" data-route="case"><svg><use href="#i-case"/></svg><span data-i18n="nav.short.case">Case</span></a>
+  </nav>
 
   <div id="toast" class="toast" hidden></div>
 

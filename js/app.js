@@ -49,42 +49,66 @@
   }
 
   /* ---------- views ---------- */
+  function icon(name) { return `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`; }
+  function greeting() {
+    const h = new Date().getHours();
+    return t(h < 12 ? "dash.morning" : h < 18 ? "dash.afternoon" : "dash.evening");
+  }
+
   function renderDashboard() {
     const lectures = window.Store.all();
     const last = window.Store.get(window.Store.getLastId()) || lectures[0];
-    const cont = last
-      ? `<div class="card continue">
-           <div class="meta">
-             <div class="label">${esc(t("dash.continue"))}</div>
-             <h2>${esc(last.title)}</h2>
-             <div class="muted small">${esc(t("dash.lastOpened"))}: ${esc(formatDate(last.updatedAt))} · ${last.units} ${esc(last.unitType === "slides" ? t("lectures.slides") : t("lectures.pages"))} · ${last.wordCount} ${esc(t("lectures.words"))}</div>
-           </div>
-           <a class="btn btn-primary" href="#/lecture/${last.id}">${esc(t("dash.continue.btn"))}</a>
+    const heroMain = last
+      ? `<div class="hero-main">
+           <span class="tag">${esc(t("dash.continue"))}</span>
+           <h2>${esc(last.title)}</h2>
+           <p class="meta">${esc(t("dash.lastAccessed"))} · ${esc(formatDate(last.updatedAt))} · ${last.units} ${esc(last.unitType === "slides" ? t("lectures.slides") : t("lectures.pages"))}</p>
+           <a class="btn btn-primary btn-arrow" href="#/lecture/${last.id}">${esc(t("dash.continue.btn"))}</a>
+           <svg class="hero-art" aria-hidden="true"><use href="#i-spark"/></svg>
          </div>`
-      : `<div class="card continue">
-           <div class="meta">
-             <div class="label">${esc(t("dash.continue"))}</div>
-             <p class="muted" style="margin:0">${esc(t("dash.continue.empty"))}</p>
-           </div>
-           <a class="btn btn-primary" href="#/upload">${esc(t("dash.upload"))}</a>
+      : `<div class="hero-main">
+           <span class="tag">${esc(t("dash.continue"))}</span>
+           <p class="meta" style="margin-top:.2rem">${esc(t("dash.continue.empty"))}</p>
+           <a class="btn btn-primary btn-arrow" href="#/upload">${esc(t("dash.upload"))}</a>
+           <svg class="hero-art" aria-hidden="true"><use href="#i-spark"/></svg>
          </div>`;
 
-    const cards = [
+    const quick = [
       ["upload", "#/upload", "dash.upload", "dash.upload.desc"],
-      ["lectures", "#/lectures", "dash.lectures", "dash.lectures.desc"],
+      ["book", "#/lectures", "dash.lectures", "dash.lectures.desc"],
       ["quiz", "#/quiz", "dash.quiz", "dash.quiz.desc"],
       ["case", "#/case", "dash.case", "dash.case.desc"],
-    ].map(([icon, href, title, desc]) => `
-      <a class="card action-card" href="${href}">
-        <div class="icon">${ICONS[icon]}</div>
+    ].map(([ic, href, title, desc]) => `
+      <a class="card qa-card" href="${href}">
+        <div class="icon-box">${icon(ic)}</div>
         <h3>${esc(t(title))}</h3>
         <p>${esc(t(desc))}</p>
       </a>`).join("");
 
+    const recent = lectures.slice(0, 3).map((l) => `
+      <div class="list-row">
+        <div class="icon-box ${l.fileType === "pptx" ? "pptx" : ""}">${icon("file")}</div>
+        <div class="info"><h3>${esc(l.title)}</h3><div class="small">${esc(t("dash.lastAccessed"))} · ${esc(formatDate(l.updatedAt))}</div></div>
+        <a class="btn ${last && l.id === last.id ? "btn-primary" : "btn-secondary"} btn-arrow" href="#/lecture/${l.id}">${esc(last && l.id === last.id ? t("dash.continue.btn") : t("dash.open"))}</a>
+      </div>`).join("");
+
     view.innerHTML = `
-      <div class="page-header"><h1>${esc(t("dash.title"))}</h1><p>${esc(t("dash.subtitle"))}</p></div>
-      ${cont}
-      <div class="grid">${cards}</div>
+      <div class="greeting"><h1>${esc(greeting())}</h1><p>${esc(t("dash.subtitle"))}</p></div>
+      <div class="hero">
+        ${heroMain}
+        <div class="card hero-side">
+          <div class="icon-box">${icon("spark")}</div>
+          <div><blockquote>“${esc(t("dash.tip"))}”</blockquote><cite>${esc(t("dash.tipSource"))}</cite></div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-head"><div><h2>${esc(t("dash.quick"))}</h2><p>${esc(t("dash.quickSub"))}</p></div></div>
+        <div class="qa-grid">${quick}</div>
+      </div>
+      <div class="section">
+        <div class="section-head"><div><h2>${esc(t("dash.recent"))}</h2><p>${esc(t("dash.recentSub"))}</p></div><a href="#/lectures" class="link-arrow">${esc(t("dash.viewAll"))}</a></div>
+        <div class="card list-card">${recent || `<div class="empty">${esc(t("lectures.empty"))}</div>`}</div>
+      </div>
       ${mockNote()}`;
   }
 
@@ -92,7 +116,7 @@
     view.innerHTML = `
       <div class="page-header"><h1>${esc(t("upload.title"))}</h1><p>${esc(t("upload.subtitle"))}</p></div>
       <label class="dropzone" id="dropzone">
-        ${ICONS.upload}
+        <div class="icon-box">${icon("upload")}</div>
         <strong>${esc(t("upload.drop"))}</strong>
         <span class="muted">${esc(t("upload.browse"))}</span>
         <span class="muted small">${esc(t("upload.hint"))}</span>
@@ -160,18 +184,18 @@
 
   function renderLectures() {
     const lectures = window.Store.all();
-    const items = lectures.length ? lectures.map((l) => `
-      <div class="card lecture-item">
-        <div class="file-badge ${l.fileType}">${l.fileType === "pptx" ? "PPTX" : "PDF"}</div>
-        <div class="info"><h3>${esc(l.title)}</h3><div class="muted small">${esc(lectureMeta(l))}</div></div>
+    const items = lectures.length ? `<div class="card list-card">${lectures.map((l) => `
+      <div class="list-row">
+        <div class="icon-box ${l.fileType === "pptx" ? "pptx" : ""}">${icon("file")}</div>
+        <div class="info"><h3>${esc(l.title)}</h3><div class="small">${esc(l.fileName)} · ${esc(lectureMeta(l))}</div></div>
         <div class="actions">
-          <a class="btn btn-ghost" href="#/lecture/${l.id}">${esc(t("lectures.open"))}</a>
+          <a class="btn btn-secondary btn-arrow" href="#/lecture/${l.id}">${esc(t("lectures.open"))}</a>
           <button class="btn btn-danger" data-del="${l.id}">${esc(t("lectures.delete"))}</button>
         </div>
-      </div>`).join("")
-      : `<div class="card"><p class="muted" style="margin:0">${esc(t("lectures.empty"))}</p><div class="btn-row"><a class="btn btn-primary" href="#/upload">${esc(t("dash.upload"))}</a></div></div>`;
+      </div>`).join("")}</div>`
+      : `<div class="card"><div class="empty">${esc(t("lectures.empty"))}</div><div class="btn-row" style="justify-content:center;margin-top:0"><a class="btn btn-primary btn-arrow" href="#/upload">${esc(t("dash.upload"))}</a></div></div>`;
 
-    view.innerHTML = `<div class="page-header"><h1>${esc(t("lectures.title"))}</h1></div><div class="lecture-list">${items}</div>`;
+    view.innerHTML = `<div class="page-header"><h1>${esc(t("lectures.title"))}</h1><p>${esc(t("dash.recentSub"))}</p></div>${items}`;
     view.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => {
       if (confirm(t("lectures.confirmDelete"))) { window.Store.remove(b.getAttribute("data-del")); renderLectures(); }
     }));
@@ -183,25 +207,59 @@
     if (!lecture) { view.innerHTML = `<div class="card"><p>${esc(t("lecture.notFound"))}</p><a class="btn btn-secondary" href="#/lectures">${esc(t("common.back"))}</a></div>`; return; }
     window.Store.setLastId(id);
 
+    const segs = window.Parsers.segments(lecture);
+    const unit = lecture.unitType === "pages" ? t("quiz.page") : t("quiz.slide");
+    const current = Math.min(slideState[lecture.id] || 0, Math.max(0, segs.length - 1));
     view.innerHTML = `
       <div class="page-header">
-        <a href="#/lectures" class="small">← ${esc(t("nav.lectures"))}</a>
+        <a href="#/lectures" class="crumb">${esc(t("nav.lectures"))}</a>
         <h1>${esc(lecture.title)}</h1>
-        <p class="muted small">${esc(lecture.fileName)} · ${esc(lectureMeta(lecture))}</p>
+        <p class="small">${esc(lecture.fileName)} · ${esc(lectureMeta(lecture))}</p>
         <div class="btn-row">
-          <a class="btn btn-primary" href="#/quiz/${lecture.id}">${esc(t("lecture.startQuiz"))}</a>
+          <a class="btn btn-primary btn-arrow" href="#/quiz/${lecture.id}">${esc(t("lecture.startQuiz"))}</a>
           <a class="btn btn-secondary" href="#/case/${lecture.id}">${esc(t("lecture.startCase"))}</a>
           <button class="btn btn-ghost" id="reanalyze">${esc(t("lecture.reanalyze"))}</button>
         </div>
       </div>
-      <div class="card" id="analysis">${spinner(t("lecture.analyzing"))}</div>`;
+      <div class="lecture-layout">
+        <aside class="card slide-nav" id="slide-nav">
+          <div class="label">${esc(t("lecture.slides"))}</div>
+          ${segs.map((s) => `<button type="button" data-slide="${s.index}" class="${s.index === current ? "active" : ""}"><strong>${esc(unit)} ${s.number}</strong><span dir="auto">${esc(s.title)}</span></button>`).join("")}
+        </aside>
+        <div class="card" id="analysis">${spinner(t("lecture.analyzing"))}</div>
+      </div>`;
 
     document.getElementById("reanalyze").addEventListener("click", async () => {
       lecture.analysis = null;
       document.getElementById("analysis").innerHTML = spinner(t("lecture.analyzing"));
       await renderAnalysis(lecture);
     });
+    view.querySelectorAll("[data-slide]").forEach((b) => b.addEventListener("click", () => {
+      slideState[lecture.id] = +b.getAttribute("data-slide");
+      tabState[lecture.id] = "content";
+      renderAnalysis(lecture);
+    }));
     await renderAnalysis(lecture);
+  }
+
+  const slideState = {};
+  function slidePanel(lecture) {
+    const segs = window.Parsers.segments(lecture);
+    if (!segs.length) return `<p class="muted">—</p>`;
+    const i = Math.min(slideState[lecture.id] || 0, segs.length - 1);
+    const seg = segs[i];
+    const unit = lecture.unitType === "pages" ? t("quiz.page") : t("quiz.slide");
+    const lines = seg.text.split("\n");
+    const body = (lines[0].trim() === seg.title ? lines.slice(1) : lines).map((l) => esc(l)).join("<br>");
+    return `
+      <div class="slide-view">
+        <h3><span class="num">${esc(unit)} ${seg.number} / ${segs.length}</span><span dir="auto">${esc(seg.title)}</span></h3>
+        <div class="slide-body" dir="auto">${body || `<span class="muted">—</span>`}</div>
+        <div class="slide-controls">
+          <button type="button" class="btn btn-secondary btn-back" id="slide-prev" ${i === 0 ? "disabled" : ""}>${esc(t("lecture.prev"))}</button>
+          <button type="button" class="btn btn-secondary btn-arrow" id="slide-next" ${i >= segs.length - 1 ? "disabled" : ""}>${esc(t("lecture.next"))}</button>
+        </div>
+      </div>`;
   }
 
   async function renderAnalysis(lecture) {
@@ -213,8 +271,8 @@
     if (!box.isConnected || lang !== window.I18N.lang) return; // view replaced meanwhile
 
     const tabs = [
-      ["explain", "lecture.tab.explain"], ["summary", "lecture.tab.summary"], ["concepts", "lecture.tab.concepts"],
-      ["terms", "lecture.tab.terms"], ["content", "lecture.tab.content"],
+      ["content", "lecture.tab.content"], ["explain", "lecture.tab.explain"], ["summary", "lecture.tab.summary"],
+      ["concepts", "lecture.tab.concepts"], ["terms", "lecture.tab.terms"],
     ];
     const panels = {
       explain: a.explanation.map((p) => `<p>${esc(p)}</p>`).join(""),
@@ -223,18 +281,32 @@
       terms: a.terms.length
         ? `<p class="muted">${esc(t("lecture.termsIntro"))}</p><dl class="term-list">${a.terms.map((x) => `<div dir="auto"><dt>${esc(x.term)}</dt><dd>${esc(x.definition)}</dd></div>`).join("")}</dl>`
         : `<p class="muted">—</p>`,
-      content: `<p class="muted small">${esc(t("lecture.contentNote"))}</p><div class="lecture-content" dir="auto">${nl2br(lecture.text)}</div>`,
     };
-    const active = tabState[lecture.id] || "explain";
+    const panelFor = (k) => (k === "content" ? slidePanel(lecture) : panels[k]);
+    const active = tabState[lecture.id] || "content";
     box.innerHTML = `
       <div class="tabs">${tabs.map(([k, label]) => `<button data-tab="${k}" class="${k === active ? "active" : ""}">${esc(t(label))}</button>`).join("")}</div>
-      <div class="tab-panel" id="tab-panel">${panels[active]}</div>`;
-    box.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => {
-      const k = b.getAttribute("data-tab");
+      <div class="tab-panel" id="tab-panel">${panelFor(active)}</div>`;
+
+    function syncSlideNav() {
+      const i = Math.min(slideState[lecture.id] || 0, window.Parsers.segments(lecture).length - 1);
+      document.querySelectorAll("#slide-nav [data-slide]").forEach((b) => b.classList.toggle("active", +b.getAttribute("data-slide") === i));
+    }
+    function bindSlideControls() {
+      const prev = document.getElementById("slide-prev");
+      const next = document.getElementById("slide-next");
+      if (prev) prev.addEventListener("click", () => { slideState[lecture.id] = Math.max(0, (slideState[lecture.id] || 0) - 1); show("content"); });
+      if (next) next.addEventListener("click", () => { slideState[lecture.id] = (slideState[lecture.id] || 0) + 1; show("content"); });
+      syncSlideNav();
+    }
+    function show(k) {
       tabState[lecture.id] = k;
-      box.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("active", x === b));
-      document.getElementById("tab-panel").innerHTML = panels[k];
-    }));
+      box.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("active", x.getAttribute("data-tab") === k));
+      document.getElementById("tab-panel").innerHTML = panelFor(k);
+      if (k === "content") bindSlideControls();
+    }
+    box.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => show(b.getAttribute("data-tab"))));
+    if (active === "content") bindSlideControls();
   }
 
   function renderPicker(titleKey, subtitleKey, chooseKey, emptyKey, base) {
@@ -290,8 +362,10 @@
     view.innerHTML = `
       ${quizHeader(lecture)}
       <div class="card">
-        <h2>${esc(t("quiz.scopeTitle"))}</h2>
-        <p class="muted">${esc(t("quiz.scopeHint"))}</p>
+        <div class="scope-head">
+          <div><h2>${esc(t("quiz.scopeTitle"))}</h2><p class="muted">${esc(t("quiz.scopeHint"))}</p></div>
+          <div class="estimate" id="estimate"></div>
+        </div>
         <div class="options scope-options">
           <button type="button" class="option ${setup.mode === "all" ? "selected" : ""}" data-scope="all">
             <span class="letter">${setup.mode === "all" ? "●" : "○"}</span>
@@ -318,6 +392,15 @@
           <button type="button" class="btn btn-primary" id="start-quiz">${esc(t("quiz.start"))}</button>
           <a class="btn btn-ghost" href="#/lecture/${lecture.id}">${esc(t("quiz.backToLecture"))}</a>
         </div>
+      </div>
+      <div class="card">
+        <h3>${esc(t("quiz.expectTitle"))}</h3>
+        <ul class="expect">
+          <li>${icon("quiz")}<span>${esc(t("quiz.expect1"))}</span></li>
+          <li>${icon("case")}<span>${esc(t("quiz.expect2"))}</span></li>
+          <li>${icon("check")}<span>${esc(t("quiz.expect3"))}</span></li>
+          <li>${icon("file")}<span>${esc(t("quiz.expect4"))}</span></li>
+        </ul>
       </div>`;
 
     const picker = document.getElementById("slide-picker");
@@ -328,7 +411,11 @@
     function chosen() { return setup.mode === "all" ? segs.map((s) => s.index) : setup.slides; }
     function refresh() {
       const n = chosen().length;
-      preview.textContent = n ? fill("quiz.countPreview", { n: cfg.quizCountFor(n) }) : t("quiz.noSlides");
+      preview.textContent = n ? "" : t("quiz.noSlides");
+      preview.hidden = n > 0;
+      document.getElementById("estimate").innerHTML = n
+        ? `${esc(t("quiz.estimate"))} <strong>~${cfg.quizCountFor(n)} ${esc(t("quiz.questionsUnit"))}</strong>${esc(t("quiz.estimateBasis"))}`
+        : "";
       selectedCount.textContent = fill("quiz.selectedCount", { n: setup.slides.length, m: segs.length });
       startBtn.disabled = n === 0;
       view.querySelectorAll(".slide-pick").forEach((l) => l.classList.toggle("checked", l.querySelector("input").checked));
@@ -562,7 +649,7 @@
     const id = parts[1];
     window.scrollTo(0, 0);
 
-    document.querySelectorAll("#main-nav a").forEach((a) => {
+    document.querySelectorAll("[data-route]").forEach((a) => {
       const r = a.getAttribute("data-route");
       a.classList.toggle("active", r === page || (page === "lecture" && r === "lectures"));
     });
