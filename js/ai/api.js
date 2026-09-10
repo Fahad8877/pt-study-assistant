@@ -4,8 +4,10 @@
  * Sends the lecture to a backend endpoint (see server-example/server.js) and
  * expects JSON in the same shape the mock provider returns:
  *
- *   task "analyze"  -> { explanation: string[], summary: string[],
- *                        concepts: [{title, detail}], terms: [{term, definition}] }
+ *   task "analyze"  -> { sections: [{key, title, lead, paragraphs: string[]}]  (whole-document synthesis:
+ *                                    overview, mechanisms, assessment, management),
+ *                        pearls: string[], terms: [{term, definition}],
+ *                        explanation: string[], summary: string[], concepts: [{title, detail}] }
  *   task "quiz"     -> { questions: [{scenario, question, options: string[], answerIndex,
  *                                     explanation, whyOthers: string[] (aligned with options)}] }
  *                      Request extras: quiz: { count, slides: [{number, text}] } — only the

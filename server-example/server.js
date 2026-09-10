@@ -28,12 +28,19 @@ const SCHEMAS = {
   analyze: {
     type: "object",
     properties: {
+      sections: { type: "array", items: { type: "object", properties: {
+        key: { type: "string", enum: ["overview", "mechanisms", "assessment", "management"] },
+        title: { type: "string" },
+        lead: { type: "string" },
+        paragraphs: { type: "array", items: { type: "string" } },
+      }, required: ["key", "title", "lead", "paragraphs"], additionalProperties: false } },
+      pearls: { type: "array", items: { type: "string" } },
       explanation: { type: "array", items: { type: "string" } },
       summary: { type: "array", items: { type: "string" } },
       concepts: { type: "array", items: { type: "object", properties: { title: { type: "string" }, detail: { type: "string" } }, required: ["title", "detail"], additionalProperties: false } },
       terms: { type: "array", items: { type: "object", properties: { term: { type: "string" }, definition: { type: "string" } }, required: ["term", "definition"], additionalProperties: false } },
     },
-    required: ["explanation", "summary", "concepts", "terms"],
+    required: ["sections", "pearls", "explanation", "summary", "concepts", "terms"],
     additionalProperties: false,
   },
   quiz: {
@@ -72,7 +79,11 @@ const SCHEMAS = {
 };
 
 const INSTRUCTIONS = {
-  analyze: "Analyze the lecture for a Master's Physical Therapy student. Return: a simple explanation (3-4 short paragraphs), a summary of the most important points (5-8 bullets), key concepts to remember (4-6, each with a one-sentence detail), and important terms with definitions (6-10).",
+  analyze: `Write as a Senior Physical Therapy Specialist and Professor synthesising the ENTIRE document as one body of knowledge (never page by page, never "slide 3 says").
+- 'sections': exactly four, in this order and with these keys: overview (clinical picture, definitions, epidemiology, scope), mechanisms (pathophysiology, biomechanics, causal chains that explain the presentation), assessment (examination, tests and measures and how findings are interpreted against the mechanism), management (interventions, precautions, contraindications and the staged, criteria-based progression). Each section has a title, a one-sentence expert 'lead' stating the clinical principle, and 2-4 paragraphs of dense professional prose that connect facts into reasoning.
+- 'pearls': 6-10 one-line clinical pearls a specialist would want a Master's student to carry into the clinic.
+- 'terms': 6-12 key terms with precise definitions. 'concepts': 4-6 core entities with a one-sentence detail. 'summary': 5-8 key points. 'explanation': a 3-paragraph plain-language version for a student.
+- Tone: authoritative, precise, domain-expert terminology. Never reference the lecture, slides, text or source; write from expertise, grounded only in the provided content.`,
   quiz: `Write a rigorous board-style assessment. Every item must evaluate mastery, not recall.
 
 CONTENT SCOPE

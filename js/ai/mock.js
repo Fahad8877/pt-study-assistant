@@ -18,13 +18,13 @@
 
   const FRAMES = {
     en: {
-      explainIntro: (title, c) => `This lecture, "${title}", focuses on ${joinList(c)}.`,
-      explainSimple: "In simple terms:",
-      explainMain: "The main ideas you should take away are:",
-      explainWhy: (c) => `Why it matters for physical therapy practice: understanding ${c} helps you examine patients accurately, choose the right treatment and explain the condition clearly. As you study, connect each concept to assessment, treatment selection and patient education.`,
-      explainNoConcept: "Why it matters: connect each point in this lecture to how you would assess and treat a patient in the clinic.",
-      conceptDetailFallback: "A recurring idea in this lecture. Review the section where it appears and be ready to explain it in your own words.",
-      termFallback: (t) => `A key term in this lecture. It appears in the context: "${t}"`,
+      sectionTitle: { overview: "Clinical overview", mechanisms: "Pathophysiology and mechanisms", assessment: "Assessment and interpretation", management: "Management and progression" },
+      leadOverview: (title, c) => c.length ? `${title} is best understood through ${joinList(c)}; these define the clinical picture and every decision that follows.` : `${title} defines a clinical picture that shapes every assessment and treatment decision that follows.`,
+      leadMechanisms: (c) => `The presentation follows directly from the underlying mechanism; understanding why ${c} behaves as it does is what separates protocol-following from clinical reasoning.`,
+      leadAssessment: "Examination findings only carry weight when they are interpreted against the mechanism; the following points determine how findings should be read.",
+      leadManagement: "Management is staged and criteria-based: each decision is justified by the stage of healing, the patient's demands and a measurable milestone before progression.",
+      conceptDetailFallback: "A recurring clinical entity throughout this material; be prepared to explain it in your own words.",
+      termFallback: (t) => `A key clinical term. It appears in the context: "${t}"`,
       caseTitle: (title) => `Clinical case: ${title}`,
       caseP1: (age, sex, occ, c) => `A ${age}-year-old ${sex} who works as ${occ} is referred to the physical therapy clinic with a presentation consistent with ${c}. The patient reports that the problem started ${onsetEn()} and is now limiting daily activities and work.`,
       caseP2: (s) => `Initial examination findings: ${s}`,
@@ -41,13 +41,13 @@
       occupations: ["a teacher", "a nurse", "an office worker", "a football player", "a construction worker", "a university student", "a retired accountant", "a delivery driver"],
     },
     ar: {
-      explainIntro: (title, c) => `تركّز هذه المحاضرة "${title}" على: ${joinList(c, "ar")}.`,
-      explainSimple: "بعبارات بسيطة:",
-      explainMain: "الأفكار الرئيسية التي يجب أن تخرج بها:",
-      explainWhy: (c) => `لماذا هذا مهم في ممارسة العلاج الطبيعي: فهم ${c} يساعدك على فحص المرضى بدقة، واختيار العلاج المناسب، وشرح الحالة بوضوح. أثناء الدراسة اربط كل مفهوم بالتقييم واختيار العلاج وتثقيف المريض.`,
-      explainNoConcept: "لماذا هذا مهم: اربط كل نقطة في هذه المحاضرة بكيفية تقييم المريض وعلاجه في العيادة.",
-      conceptDetailFallback: "فكرة متكررة في هذه المحاضرة. راجع الجزء الذي وردت فيه وكن مستعدًا لشرحها بأسلوبك.",
-      termFallback: (t) => `مصطلح أساسي في هذه المحاضرة. ورد في السياق التالي: "${t}"`,
+      sectionTitle: { overview: "نظرة سريرية عامة", mechanisms: "الفسيولوجيا المرضية والآليات", assessment: "التقييم والتفسير", management: "العلاج والتدرج" },
+      leadOverview: (title, c) => c.length ? `يُفهم ${title} على أفضل وجه من خلال ${joinList(c, "ar")}؛ فهذه تحدد الصورة السريرية وكل قرار يليها.` : `يحدد ${title} صورة سريرية تشكّل كل قرار تقييم وعلاج يليها.`,
+      leadMechanisms: (c) => `ينبع عرض الحالة مباشرة من الآلية الكامنة؛ وفهم سبب سلوك ${c} بهذه الطريقة هو ما يميّز التفكير السريري عن مجرد اتباع البروتوكول.`,
+      leadAssessment: "لا تكتسب نتائج الفحص قيمتها إلا عند تفسيرها في ضوء الآلية؛ والنقاط التالية تحدد كيفية قراءة هذه النتائج.",
+      leadManagement: "العلاج متدرج ومبني على معايير: كل قرار تبرره مرحلة الشفاء ومتطلبات المريض ومعلم قابل للقياس قبل التقدم.",
+      conceptDetailFallback: "كيان سريري متكرر في هذه المادة؛ كن مستعدًا لشرحه بأسلوبك.",
+      termFallback: (t) => `مصطلح سريري أساسي. ورد في السياق التالي: "${t}"`,
       caseTitle: (title) => `حالة سريرية: ${title}`,
       caseP1: (age, sex, occ, c) => `${sex} يبلغ من العمر ${age} عامًا، يعمل ${occ}، تمت إحالته إلى عيادة العلاج الطبيعي بعرض حالة يتوافق مع ${c}. يذكر المريض أن المشكلة بدأت ${onsetAr()} وأصبحت تحدّ من الأنشطة اليومية والعمل.`,
       caseP2: (s) => `نتائج الفحص الأولي: ${s}`,
@@ -258,25 +258,63 @@
 
   /* ---------- provider methods ---------- */
 
+  /* ---------- whole-document expert synthesis ----------
+   * Every sentence of the document is classified into one of four clinical
+   * lenses and woven into short paragraphs with an expert framing line:
+   *   overview   – definitions, epidemiology, scope
+   *   mechanisms – pathophysiology, biomechanics, causal relationships
+   *   assessment – examination, tests, measures and their interpretation
+   *   management – interventions, precautions, staged progression
+   */
+  const DECIDE_RE = /\b(should|avoid|avoided|recommend|recommended|preferred|contraindicat|precaution|phase|stage|progress|return to|exercise|exercises|training|program|programme|protocol|position|positioning|mobili[sz]|stretch|strengthen|splint|orthosis|brace|sling|treat|treatment|manage|management|therap|intervention|educat|goal|discharge|refer)/i;
+  const MECH_RE = /\b(because|due to|caused by|cause[sd]?|leads? to|results? in|mechanism|patho|lesion|damage|injur|inhibit|reflex|innervat|neur|receptor|inflamm|degenerat|load|force|strain|shear|tension|compress|instab|weakness|tone|spastic|flaccid|oedema|edema|swelling|bleed|hemarthrosis|risk)/i;
+  const ASSESS_RE = /\b(test|tests|assess|examin|measure|scale|score|sign|symptom|present|report|history|diagnos|imaging|mri|x-ray|ultrasound|sensitiv|specific|positive|negative|observ|grade|index|criteria|criterion|screen|findings?)/i;
+
+  function classify(text) {
+    if (DECIDE_RE.test(text)) return "management";
+    if (MECH_RE.test(text)) return "mechanisms";
+    if (ASSESS_RE.test(text)) return "assessment";
+    return "overview";
+  }
+  function paragraphs(sentences, perParagraph) {
+    const out = [];
+    for (let i = 0; i < sentences.length; i += perParagraph) {
+      out.push(sentences.slice(i, i + perParagraph).map((s) => /[.!?]$/.test(s) ? s : s + ".").join(" "));
+    }
+    return out;
+  }
+
   async function analyze(lecture, lang) {
-    await delay(700 + Math.random() * 500);
+    await delay(900 + Math.random() * 600);
     const L = FRAMES[lang] || FRAMES.en;
     const a = analyzeText(lecture);
     const conceptNames = a.concepts.slice(0, 3).map((c) => c.title);
 
-    const explanation = [];
-    explanation.push(L.explainIntro(a.title, conceptNames));
-    const simple = a.concepts.slice(0, 2).map((c) => c.detail).filter(Boolean);
-    if (simple.length) explanation.push(`${L.explainSimple} ${simple.join(" ")}`);
-    const main = a.summary.slice(0, 2).map((s) => s.text);
-    if (main.length) explanation.push(`${L.explainMain} ${main.join(" ")}`);
-    explanation.push(conceptNames.length ? L.explainWhy(conceptNames[0]) : L.explainNoConcept);
+    // Whole-document classification (all slides together), keeping document order.
+    const usable = a.sentences.filter((s) => !OBJECTIVE_RE.test(s.text) && s.text.toLowerCase() !== String(a.title || "").toLowerCase());
+    const buckets = { overview: [], mechanisms: [], assessment: [], management: [] };
+    usable.forEach((s) => buckets[classify(s.text)].push(s));
+    const top = (list, n) => list.slice().sort((x, y) => y.score - x.score).slice(0, n).sort((x, y) => x.index - y.index).map((s) => s.text);
+
+    const sections = [];
+    const push = (key, lead, list, n) => {
+      const picked = top(list, n);
+      if (picked.length) sections.push({ key, title: L.sectionTitle[key], lead, paragraphs: paragraphs(picked, 3) });
+    };
+    push("overview", L.leadOverview(a.title, conceptNames), buckets.overview, 6);
+    push("mechanisms", L.leadMechanisms(conceptNames[0] || a.title), buckets.mechanisms, 8);
+    push("assessment", L.leadAssessment, buckets.assessment, 8);
+    push("management", L.leadManagement, buckets.management, 9);
+
+    const explanation = sections.map((s) => `${s.lead} ${s.paragraphs[0]}`);
 
     return {
+      sections,
+      pearls: a.summary.map((s) => s.text),
       explanation,
       summary: a.summary.map((s) => s.text),
       concepts: a.concepts.map((c) => ({ title: c.title, detail: c.detail || L.conceptDetailFallback })),
-      terms: a.defs.slice(0, 8).map((d) => ({ term: d.term, definition: d.definition })),
+      terms: a.defs.slice(0, 10).map((d) => ({ term: d.term, definition: d.definition })),
     };
   }
 
@@ -669,7 +707,12 @@
     const ageRange = [[28, 55], [25, 50], [24, 58], [18, 34], [22, 55], [19, 26], [62, 74], [21, 45]][occIndex] || [20, 60];
     const age = ageRange[0] + Math.floor(rand() * (ageRange[1] - ageRange[0]));
     const sex = rand() < 0.5 ? L.male : L.female;
-    const findingSentence = (c1.sentence && c1.sentence.text) || (a.summary[0] && a.summary[0].text) || "";
+    // Examination findings: prefer sentences about signs, symptoms, tests or measures over anatomy/definitions.
+    const FINDING_RE = /\b(patients?|reports?|present|describe|pain|swelling|instab|weakness|limited|difficult|positive|negative|test|sign|score|scale|grade|degrees|percent|history|onset)\b/i;
+    const findingPool = a.sentences.filter((s) => FINDING_RE.test(s.text) && s !== c1.sentence).sort((x, y) => y.score - x.score);
+    const conceptWord = (c1.title || "").split(" ")[0].toLowerCase();
+    const relatedFinding = findingPool.find((s) => conceptWord.length > 3 && s.text.toLowerCase().includes(conceptWord));
+    const findingSentence = (relatedFinding || findingPool[0] || c1.sentence || a.summary[0] || { text: "" }).text;
 
     const presentation = [L.caseP1(age, sex, occ, c1.title), L.caseP2(findingSentence), L.caseP3];
     const questions = [];

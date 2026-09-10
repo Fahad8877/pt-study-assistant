@@ -40,7 +40,7 @@
   /* ---------- analysis (cached per language) ---------- */
   async function ensureAnalysis(lecture) {
     const lang = window.I18N.lang;
-    if (lecture.analysis && lecture.analysisLang === lang) return lecture.analysis;
+    if (lecture.analysis && lecture.analysis.sections && lecture.analysisLang === lang) return lecture.analysis;
     const analysis = await window.AI.analyze(lecture);
     lecture.analysis = analysis;
     lecture.analysisLang = lang;
@@ -201,15 +201,24 @@
     }));
   }
 
-  const tabState = {};
+  /* ---------- lecture: whole-document expert synthesis ---------- */
+  async function ensureCases(lecture) {
+    const lang = window.I18N.lang;
+    if (Array.isArray(lecture.cases) && lecture.cases.length && lecture.casesLang === lang) return lecture.cases;
+    const cases = [];
+    for (let i = 0; i < 2; i++) cases.push(await window.AI.clinicalCase(lecture));
+    lecture.cases = cases;
+    lecture.casesLang = lang;
+    window.Store.upsert(lecture);
+    return cases;
+  }
+
   async function renderLecture(id) {
     const lecture = window.Store.get(id);
     if (!lecture) { view.innerHTML = `<div class="card"><p>${esc(t("lecture.notFound"))}</p><a class="btn btn-secondary" href="#/lectures">${esc(t("common.back"))}</a></div>`; return; }
     window.Store.setLastId(id);
 
     const segs = window.Parsers.segments(lecture);
-    const unit = lecture.unitType === "pages" ? t("quiz.page") : t("quiz.slide");
-    const current = Math.min(slideState[lecture.id] || 0, Math.max(0, segs.length - 1));
     view.innerHTML = `
       <div class="page-header">
         <a href="#/lectures" class="crumb">${esc(t("nav.lectures"))}</a>
@@ -220,104 +229,95 @@
           <span>${icon("file")} ${esc(lecture.fileName)}</span>
         </p>
         <div class="btn-row">
-          <a class="btn btn-primary btn-arrow" href="#/quiz/${lecture.id}">${esc(t("lecture.startQuiz"))}</a>
+          <a class="btn btn-primary btn-arrow" href="#/quiz/${lecture.id}">${esc(t("lecture.startAssessment"))}</a>
           <a class="btn btn-secondary" href="#/case/${lecture.id}">${esc(t("lecture.startCase"))}</a>
           <button class="btn btn-ghost" id="reanalyze">${esc(t("lecture.reanalyze"))}</button>
         </div>
       </div>
-      <div class="lecture-layout">
-        <aside class="card slide-nav ${current >= 8 ? "expanded" : ""}" id="slide-nav">
-          <div class="label">${esc(t("lecture.slides"))}</div>
-          ${segs.map((s) => `<button type="button" data-slide="${s.index}" class="${s.index >= 8 ? "extra " : ""}${s.index === current ? "active" : ""}"><strong>${esc(unit)} ${s.number}</strong><span dir="auto">${esc(s.title)}</span></button>`).join("")}
-          ${segs.length > 8 ? `<button type="button" class="more" id="slide-more">${esc(fill("lecture.more", { n: segs.length - 8 }))}</button>` : ""}
-        </aside>
-        <div class="card" id="analysis">${spinner(t("lecture.analyzing"))}</div>
-      </div>`;
+      <nav class="subnav" aria-label="Sections">
+        <button type="button" data-jump="sec-summary"><span class="step">1</span>${esc(t("lecture.sec.summary"))}</button>
+        <button type="button" data-jump="sec-cases"><span class="step">2</span>${esc(t("lecture.sec.cases"))}</button>
+        <button type="button" data-jump="sec-assessment"><span class="step">3</span>${esc(t("lecture.sec.assessment"))}</button>
+      </nav>
+      <div id="lecture-body"><div class="card">${spinner(t("lecture.analyzing"))}</div></div>`;
 
     document.getElementById("reanalyze").addEventListener("click", async () => {
       lecture.analysis = null;
-      document.getElementById("analysis").innerHTML = spinner(t("lecture.analyzing"));
-      await renderAnalysis(lecture);
+      lecture.cases = null;
+      document.getElementById("lecture-body").innerHTML = `<div class="card">${spinner(t("lecture.analyzing"))}</div>`;
+      await renderLectureBody(lecture);
     });
-    view.querySelectorAll("[data-slide]").forEach((b) => b.addEventListener("click", () => {
-      slideState[lecture.id] = +b.getAttribute("data-slide");
-      tabState[lecture.id] = "content";
-      renderAnalysis(lecture);
+    view.querySelectorAll("[data-jump]").forEach((b) => b.addEventListener("click", () => {
+      const el = document.getElementById(b.getAttribute("data-jump"));
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
     }));
-    const more = document.getElementById("slide-more");
-    if (more) more.addEventListener("click", () => {
-      const nav = document.getElementById("slide-nav");
-      nav.classList.toggle("expanded");
-      more.textContent = nav.classList.contains("expanded") ? t("lecture.less") : fill("lecture.more", { n: segs.length - 8 });
-    });
-    await renderAnalysis(lecture);
+    await renderLectureBody(lecture);
   }
 
-  const slideState = {};
-  function slidePanel(lecture) {
-    const segs = window.Parsers.segments(lecture);
-    if (!segs.length) return `<p class="muted">—</p>`;
-    const i = Math.min(slideState[lecture.id] || 0, segs.length - 1);
-    const seg = segs[i];
-    const unit = lecture.unitType === "pages" ? t("quiz.page") : t("quiz.slide");
-    const lines = seg.text.split("\n");
-    const body = (lines[0].trim() === seg.title ? lines.slice(1) : lines).map((l) => esc(l)).join("<br>");
-    return `
-      <div class="slide-view">
-        <h3><span class="num">${esc(unit)} ${seg.number} / ${segs.length}</span><span dir="auto">${esc(seg.title)}</span></h3>
-        <div class="slide-body" dir="auto">${body || `<span class="muted">—</span>`}</div>
-        <div class="slide-controls">
-          <button type="button" class="btn btn-secondary btn-back" id="slide-prev" ${i === 0 ? "disabled" : ""}>${esc(t("lecture.prev"))}</button>
-          <button type="button" class="btn btn-secondary btn-arrow" id="slide-next" ${i >= segs.length - 1 ? "disabled" : ""}>${esc(t("lecture.next"))}</button>
-        </div>
-      </div>`;
-  }
-
-  async function renderAnalysis(lecture) {
-    const box = document.getElementById("analysis");
+  async function renderLectureBody(lecture) {
+    const box = document.getElementById("lecture-body");
     const lang = window.I18N.lang;
-    let a;
-    try { a = await ensureAnalysis(lecture); }
-    catch (err) { console.error(err); box.innerHTML = `<div class="alert alert-error">${esc(t("upload.error.generic"))}</div>`; return; }
-    if (!box.isConnected || lang !== window.I18N.lang) return; // view replaced meanwhile
+    const token = renderToken;
+    let a, cases;
+    try {
+      a = await ensureAnalysis(lecture);
+      cases = await ensureCases(lecture);
+    } catch (err) {
+      console.error(err);
+      box.innerHTML = `<div class="card"><div class="alert alert-error">${esc(t("upload.error.generic"))}</div></div>`;
+      return;
+    }
+    if (!box.isConnected || lang !== window.I18N.lang || token !== renderToken) return; // view replaced meanwhile
 
-    const tabs = [
-      ["content", "lecture.tab.content"], ["explain", "lecture.tab.explain"], ["summary", "lecture.tab.summary"],
-      ["concepts", "lecture.tab.concepts"], ["terms", "lecture.tab.terms"],
-    ];
-    const panels = {
-      explain: a.explanation.map((p) => `<p>${esc(p)}</p>`).join(""),
-      summary: `<p class="muted">${esc(t("lecture.summaryIntro"))}</p><ul>${a.summary.map((s) => `<li dir="auto">${esc(s)}</li>`).join("")}</ul>`,
-      concepts: `<p class="muted">${esc(t("lecture.conceptsIntro"))}</p><ul class="concept-list">${a.concepts.map((c) => `<li dir="auto"><strong>${esc(c.title)}</strong>${esc(c.detail)}</li>`).join("")}</ul>`,
-      terms: a.terms.length
-        ? `<p class="muted">${esc(t("lecture.termsIntro"))}</p><dl class="term-list">${a.terms.map((x) => `<div dir="auto"><dt>${esc(x.term)}</dt><dd>${esc(x.definition)}</dd></div>`).join("")}</dl>`
-        : `<p class="muted">—</p>`,
-    };
-    const panelFor = (k) => (k === "content" ? slidePanel(lecture) : panels[k]);
-    const active = tabState[lecture.id] || "content";
+    const sections = (a.sections || []).map((s) => `
+      <section class="synth">
+        <h3>${esc(s.title)}</h3>
+        <p class="lead" dir="auto">${esc(s.lead)}</p>
+        ${(s.paragraphs || []).map((p) => `<p dir="auto">${esc(p)}</p>`).join("")}
+      </section>`).join("");
+    const pearls = (a.pearls || a.summary || []).length
+      ? `<section class="synth"><h3>${esc(t("lecture.pearls"))}</h3><ul>${(a.pearls || a.summary).map((p) => `<li dir="auto">${esc(p)}</li>`).join("")}</ul></section>` : "";
+    const terms = (a.terms || []).length
+      ? `<section class="synth"><h3>${esc(t("lecture.terminology"))}</h3><dl class="term-list">${a.terms.map((x) => `<div dir="auto"><dt>${esc(x.term)}</dt><dd>${esc(x.definition)}</dd></div>`).join("")}</dl></section>` : "";
+
+    const vignettes = cases.map((c, i) => `
+      <article class="vignette">
+        <h3>${esc(t("lecture.case"))} ${i + 1}</h3>
+        ${(c.presentation || []).map((p) => `<p dir="auto">${esc(p)}</p>`).join("")}
+        <h4>${esc(t("lecture.reasoning"))}</h4>
+        <ul>${(c.questions || []).filter((q) => q.type === "open" && q.modelAnswer).map((q) => `<li dir="auto"><strong>${esc(q.question)}</strong><br>${esc(q.modelAnswer)}</li>`).join("")}</ul>
+      </article>`).join("");
+
+    const estimate = window.APP_CONFIG.quizCountFor(window.Parsers.segments(lecture).length);
+
     box.innerHTML = `
-      <div class="tabs">${tabs.map(([k, label]) => `<button data-tab="${k}" class="${k === active ? "active" : ""}">${esc(t(label))}</button>`).join("")}</div>
-      <div class="tab-panel" id="tab-panel">${panelFor(active)}</div>`;
-
-    function syncSlideNav() {
-      const i = Math.min(slideState[lecture.id] || 0, window.Parsers.segments(lecture).length - 1);
-      document.querySelectorAll("#slide-nav [data-slide]").forEach((b) => b.classList.toggle("active", +b.getAttribute("data-slide") === i));
-    }
-    function bindSlideControls() {
-      const prev = document.getElementById("slide-prev");
-      const next = document.getElementById("slide-next");
-      if (prev) prev.addEventListener("click", () => { slideState[lecture.id] = Math.max(0, (slideState[lecture.id] || 0) - 1); show("content"); });
-      if (next) next.addEventListener("click", () => { slideState[lecture.id] = (slideState[lecture.id] || 0) + 1; show("content"); });
-      syncSlideNav();
-    }
-    function show(k) {
-      tabState[lecture.id] = k;
-      box.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("active", x.getAttribute("data-tab") === k));
-      document.getElementById("tab-panel").innerHTML = panelFor(k);
-      if (k === "content") bindSlideControls();
-    }
-    box.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => show(b.getAttribute("data-tab"))));
-    if (active === "content") bindSlideControls();
+      <section class="card section-card" id="sec-summary">
+        <div class="section-title"><span class="step">1</span><h2>${esc(t("lecture.sec.summary"))}</h2></div>
+        <p>${esc(t("lecture.sec.summaryDesc"))}</p>
+        ${sections}${pearls}${terms}
+      </section>
+      <section class="card section-card" id="sec-cases">
+        <div class="section-title"><span class="step">2</span><h2>${esc(t("lecture.sec.cases"))}</h2></div>
+        <p>${esc(t("lecture.sec.casesDesc"))}</p>
+        ${vignettes}
+        <div class="btn-row"><a class="btn btn-secondary btn-arrow" href="#/case/${lecture.id}">${esc(t("lecture.workCase"))}</a></div>
+      </section>
+      <section class="card section-card" id="sec-assessment">
+        <div class="section-title"><span class="step">3</span><h2>${esc(t("lecture.sec.assessment"))}</h2></div>
+        <p>${esc(t("lecture.sec.assessmentDesc"))}</p>
+        <ul class="expect">
+          <li>${icon("quiz")}<span>${esc(t("quiz.expect1"))}</span></li>
+          <li>${icon("case")}<span>${esc(t("quiz.expect2"))}</span></li>
+          <li>${icon("check")}<span>${esc(t("quiz.expect3"))}</span></li>
+          <li>${icon("file")}<span>${esc(t("quiz.expect4"))}</span></li>
+        </ul>
+        <p class="muted small" style="margin-top:1rem">${esc(fill("lecture.assessmentEstimate", { n: estimate }))}</p>
+        <div class="btn-row"><a class="btn btn-primary btn-arrow" href="#/quiz/${lecture.id}">${esc(t("lecture.startAssessment"))}</a></div>
+      </section>
+      <details class="source">
+        <summary>${esc(t("lecture.sourceText"))}</summary>
+        <div class="lecture-content" dir="auto">${nl2br(lecture.text)}</div>
+      </details>`;
   }
 
   function renderPicker(titleKey, subtitleKey, chooseKey, emptyKey, base) {
