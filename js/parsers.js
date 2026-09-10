@@ -78,7 +78,11 @@
       parts = (lecture.text || "").split(/\n\s*\n/).map((t) => t.trim()).filter(Boolean).map((t, i) => ({ number: i + 1, text: t }));
     }
     return parts.map((p, index) => {
-      const firstLine = p.text.split("\n")[0].trim();
+      let firstLine = p.text.split("\n")[0].trim().replace(/^[\s•·\-–—*▪◦]+\s*/, "");
+      const letters = firstLine.replace(/[^A-Za-z]/g, "");
+      if (letters.length >= 6 && letters === letters.toUpperCase()) {
+        firstLine = firstLine.toLowerCase().replace(/(^|\s)([a-z])/g, (m, sp, ch) => sp + ch.toUpperCase());
+      }
       const title = firstLine.length <= 70 ? firstLine : firstLine.slice(0, 60).replace(/\s+\S*$/, "") + "…";
       return { index, number: p.number, title, text: p.text };
     });

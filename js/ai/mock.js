@@ -117,13 +117,18 @@
     chosen.forEach((segIndex) => {
       const seg = segments[segIndex];
       if (!seg) return;
-      seg.text.split(/\n+/).forEach((line) => {
+      seg.text.split(/\n+/).forEach((rawLine) => {
+        // Bullet markers and ALL-CAPS lines are common in real slide decks.
+        let line = rawLine.replace(/^[\s•·\-–—*▪◦o]+\s*/, "").trim();
+        const letters = line.replace(/[^A-Za-z]/g, "");
+        if (letters.length >= 6 && letters === letters.toUpperCase()) line = cap(line.toLowerCase());
         line.split(/(?<=[.!?])\s+(?=[A-Z"'(])/).forEach((raw) => {
           const s = raw.trim().replace(/\s+/g, " ");
           const key = s.toLowerCase();
-          if (s.length < 30 || s.length > 320) return;
+          if (s.length < 22 || s.length > 400) return;
+          if (s.split(/\s+/).length < 4) return;
           if (!/[a-z]{3}/i.test(s)) return;
-          if ((s.match(/[A-Za-z]/g) || []).length / s.length < 0.6) return;
+          if ((s.match(/[A-Za-z]/g) || []).length / s.length < 0.55) return;
           if (seen.has(key)) return;
           seen.add(key);
           out.push({ text: s, index: out.length, seg: segIndex });
@@ -168,7 +173,7 @@
       defs.push({ term, definition, sentence, abbr: !!abbr });
     };
     const re = /^(?:The |A |An )?([A-Za-z][A-Za-z0-9\-]*(?:\s[A-Za-z0-9\-]+){0,4}?)(?:\s\(([A-Z]{2,6})\))?\s(?:is|are)\s(?:defined as\s|the\s|a\s|an\s)?(.{15,})$/;
-    const re2 = /^([A-Z][A-Za-z0-9\-\s]{2,50}?)\s?[:–—-]\s(.{40,})$/;
+    const re2 = /^([A-Z][A-Za-z0-9\-\s]{2,50}?)\s?[:–—-]\s(.{25,})$/;
     sentences.forEach((s) => {
       let m = s.text.match(re);
       if (m && goodTerm(m[1])) {
@@ -178,7 +183,7 @@
         return;
       }
       m = s.text.match(re2);
-      if (m && goodTerm(m[1]) && m[2].split(/\s+/).length >= 6) add(cap(cleanTerm(m[1])), m[2], s);
+      if (m && goodTerm(m[1]) && m[2].split(/\s+/).length >= 4) add(cap(cleanTerm(m[1])), m[2], s);
     });
     // Abbreviations anywhere: "Magnetic resonance imaging (MRI)"
     sentences.forEach((s) => {
@@ -237,7 +242,11 @@
     seed = hash(lecture.id || lecture.title || "x");
     const segments = window.Parsers.segments(lecture);
     const chosen = Array.isArray(segIndexes) && segIndexes.length ? segIndexes.filter((i) => segments[i]) : segments.map((_, i) => i);
-    const sentences = splitSentences(segments, chosen);
+    // Sentences from the whole lecture are kept (they make good distractors);
+    // only in-scope sentences may become correct answers.
+    const chosenSet = new Set(chosen);
+    const sentences = splitSentences(segments, segments.map((_, i) => i));
+    sentences.forEach((s) => { s.inScope = chosenSet.has(s.seg); });
     const freq = wordFreq(sentences);
     scoreSentences(sentences, freq);
     const defs = extractDefinitions(sentences);
@@ -264,7 +273,7 @@
     const summary = sentences.slice().sort((a, b) => b.score - a.score).slice(0, Math.min(7, Math.max(3, Math.round(sentences.length / 5))))
       .sort((a, b) => a.index - b.index);
 
-    return { sentences, freq, defs, phrases, concepts, summary, title };
+    return { sentences, freq, defs, phrases, concepts, summary, title, segments };
   }
 
   const delay = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -316,6 +325,11 @@
       qSequence: (phase, focus) => `A patient has completed ${phase}, which the lecture describes as: "${focus}". What should the next phase focus on?`,
       qStatement: "Which of the following statements is correct according to the lecture?",
       qStatementAbout: (subject) => `Which statement about ${subject} is correct according to the lecture?`,
+      qBelongs: (h) => `According to the lecture, which of the following is presented under "${h}"?`,
+      qHeading: (p) => `The lecture presents this point: "${p}". Which topic does it belong to?`,
+      expBelongs: (h, s) => `Correct. Under "${h}" the lecture presents: "${s}"`,
+      whyBelongs: (h) => `This point comes from a different part of the lecture: "${h}".`,
+      whyHeading: (h, p) => `"${h}" covers other points, for example: "${p}"`,
       qTerm: (desc) => `A clinical note describes the following finding: "${desc}". Which term from the lecture correctly labels it?`,
       expCorrect: (s) => `Correct. The lecture states: "${s}"`,
       expWhy: (x, y) => `Correct. The lecture explains that ${x} because ${y}.`,
@@ -344,6 +358,11 @@
       qSequence: (phase, focus) => `أكمل مريض ${phase}، والتي تصفها المحاضرة بأنها: "${focus}". على ماذا يجب أن تركز المرحلة التالية؟`,
       qStatement: "أيٌّ من العبارات التالية صحيحة وفقًا للمحاضرة؟",
       qStatementAbout: (subject) => `أي عبارة بخصوص ${subject} صحيحة وفقًا للمحاضرة؟`,
+      qBelongs: (h) => `وفقًا للمحاضرة، أيٌّ مما يلي ورد تحت عنوان "${h}"؟`,
+      qHeading: (p) => `تعرض المحاضرة هذه النقطة: "${p}". إلى أي موضوع تنتمي؟`,
+      expBelongs: (h, s) => `إجابة صحيحة. تحت عنوان "${h}" تعرض المحاضرة: "${s}"`,
+      whyBelongs: (h) => `هذه النقطة من جزء مختلف من المحاضرة: "${h}".`,
+      whyHeading: (h, p) => `"${h}" يغطي نقاطًا أخرى، مثل: "${p}"`,
       qTerm: (desc) => `يصف تقرير سريري النتيجة التالية: "${desc}". ما المصطلح من المحاضرة الذي يصفها بشكل صحيح؟`,
       expCorrect: (s) => `إجابة صحيحة. تذكر المحاضرة: "${s}"`,
       expWhy: (x, y) => `إجابة صحيحة. توضح المحاضرة أن ${x} لأن ${y}.`,
@@ -399,6 +418,7 @@
       const re = new RegExp("\\b" + esc(from) + "\\b", "i");
       const m = text.match(re);
       if (!m) continue;
+      if (new RegExp("\\b" + esc(to) + "\\b", "i").test(text)) continue; // both words present: swap would be nonsense
       const rep = /^[A-Z]/.test(m[0]) ? cap(to) : to;
       const altered = text.replace(re, rep);
       if (seen.has(altered.toLowerCase())) continue;
@@ -431,8 +451,10 @@
 
   function buildQuizCandidates(a, L) {
     const cands = [];
-    const facts = a.sentences.filter((s) => /[.!?]$/.test(s.text) && FACT_RE.test(s.text) && !OBJECTIVE_RE.test(s.text));
+    const facts = a.sentences.filter((s) => FACT_RE.test(s.text) && !OBJECTIVE_RE.test(s.text));
+    const fragments = a.sentences.filter((s) => !OBJECTIVE_RE.test(s.text));
     const add = (tpl, s, question, scenario, correct, wrongs, explanation) => {
+      if (s.inScope === false) return; // correct answers must come from the selected slides
       const uniq = [];
       wrongs.forEach((w) => { if (w && w.text && w.text.toLowerCase() !== correct.toLowerCase() && !uniq.some((u) => u.text.toLowerCase() === w.text.toLowerCase())) uniq.push(w); });
       if (uniq.length < 3) return;
@@ -518,7 +540,7 @@
       return m ? { term: d.term, desc: stripEnd(m[1]), s: d.sentence } : null;
     }).filter(Boolean);
     if (defs.length >= 4) {
-      shuffle(defs).slice(0, 3).forEach((d) => {
+      shuffle(defs.filter((d) => d.s.inScope !== false)).slice(0, 3).forEach((d) => {
         const others = shuffle(defs.filter((o) => o !== d)).slice(0, 3);
         if (others.length < 3) return;
         // mismatch: each other term gets a different other term's description
@@ -563,6 +585,32 @@
       add("statement", s, subject ? L.qStatementAbout(subject) : L.qStatement, "", stripEnd(s.text), wrongs, L.expCorrect(s.text));
     });
 
+    // belongs / heading: fallback for bullet-style slides (short points under a slide heading)
+    const segTitle = (i) => (a.segments[i] && a.segments[i].title) || "";
+    const GENERIC_SLIDE_RE = /^(unit|lecture|chapter|module|week|session|part|summary|conclusion|learning objectives?|objectives?|outline|contents?|agenda|references?|reading|thank you|questions?|introduction)\b/i;
+    const bySegFrag = {};
+    fragments.forEach((s) => {
+      const title = segTitle(s.seg);
+      if (!title || title.length > 70 || GENERIC_SLIDE_RE.test(title) || s.text.toLowerCase() === title.toLowerCase()) return;
+      if (s.seg === 0 && title.toLowerCase() === String(a.title || "").toLowerCase()) return; // title slide
+      (bySegFrag[s.seg] = bySegFrag[s.seg] || []).push(s);
+    });
+    const fragSegs = Object.keys(bySegFrag).map(Number);
+    if (fragSegs.length >= 4) {
+      fragSegs.forEach((segIdx) => {
+        const own = bySegFrag[segIdx];
+        const otherSegs = fragSegs.filter((o) => o !== segIdx && segTitle(o).toLowerCase() !== segTitle(segIdx).toLowerCase());
+        if (otherSegs.length < 3) return;
+        own.slice(0, 2).forEach((s) => {
+          const wrongs = shuffle(otherSegs).slice(0, 3).map((o) => ({ text: stripEnd(pick(bySegFrag[o]).text), why: L.whyBelongs(segTitle(o)) }));
+          add("belongs", s, L.qBelongs(segTitle(segIdx)), "", stripEnd(s.text), wrongs, L.expBelongs(segTitle(segIdx), s.text));
+        });
+        const last = own[own.length - 1];
+        const headingWrongs = shuffle(otherSegs).slice(0, 3).map((o) => ({ text: segTitle(o), why: L.whyHeading(segTitle(o), pick(bySegFrag[o]).text) }));
+        add("heading", last, L.qHeading(stripEnd(last.text)), "", segTitle(segIdx), headingWrongs, L.expBelongs(segTitle(segIdx), last.text));
+      });
+    }
+
     // term: label a described finding (low priority filler)
     if (defs.length >= 4) {
       defs.forEach((d) => {
@@ -574,7 +622,7 @@
     return cands;
   }
 
-  const TEMPLATE_PRIORITY = { why: 0, effect: 0, sequence: 0, decision: 1, match: 1, threshold: 2, statement: 3, term: 5 };
+  const TEMPLATE_PRIORITY = { why: 0, effect: 0, sequence: 0, decision: 1, match: 1, threshold: 2, statement: 3, belongs: 4, heading: 4, term: 5 };
 
   /** Picks questions round-robin across the selected slides, favouring reasoning templates and variety. */
   function selectQuestions(cands, target) {
