@@ -73,9 +73,49 @@ const SCHEMAS = {
 
 const INSTRUCTIONS = {
   analyze: "Analyze the lecture for a Master's Physical Therapy student. Return: a simple explanation (3-4 short paragraphs), a summary of the most important points (5-8 bullets), key concepts to remember (4-6, each with a one-sentence detail), and important terms with definitions (6-10).",
-  quiz: "Act as an experienced Master's-level Physical Therapy professor and clinical educator. Write multiple-choice questions based ONLY on the provided slides that test understanding and clinical reasoning: clinical application, mechanisms, interpretation of findings, comparing related concepts, clinical decision-making, and applying the content to realistic patient scenarios. Use a short realistic scenario where appropriate (put it in 'scenario', otherwise leave it empty). Do not write fill-in-the-blank questions, do not copy slide sentences verbatim, and do not test pure recall of definitions. Each question has exactly 4 plausible options, answerIndex, a short explanation of why the correct answer is right, and whyOthers: an array aligned with options giving a brief reason each other option is less appropriate (empty string for the correct option). Distribute questions across all the provided slides.",
-  case: "Write one simple clinical case related to the lecture: a short patient presentation (3 paragraphs), then 4 questions for the student. Mix 'mcq' questions (4 options, answerIndex, feedback) and 'open' questions (modelAnswer plus 5-10 keywords a good answer should contain). For mcq questions set modelAnswer to '' and keywords to []; for open questions set options to [], answerIndex to 0 and feedback to ''.",
+  quiz: `Write a rigorous board-style assessment. Every item must evaluate mastery, not recall.
+
+CONTENT SCOPE
+- Ground every item in the provided material only. Do not introduce facts, values or recommendations that the material does not support.
+- Distribute items across all provided slides so later slides are covered as much as early ones.
+
+RIGOR AND DEPTH (each item targets one of these; use all of them across the set)
+- Mechanism: why a response, sign or outcome occurs (pathophysiology, biomechanics, physiology).
+- Sequencing and progression: what must be achieved before advancing, what comes next and why.
+- Decision-making: the most appropriate next step, intervention, precaution or contraindication for a specific patient.
+- Interpretation: what a measured value, test result or observed response means for management.
+- Discrimination: which of several closely related entities, tests or interventions fits the situation.
+
+SCENARIO REQUIREMENT
+- At least two thirds of the items open with a short, realistic clinical vignette in 'scenario' (age, relevant history, key findings, stage of care). Leave 'scenario' empty only for pure mechanism items.
+
+TONE AND PHRASING
+- Write as a domain expert examining a Master's-level clinician: authoritative, precise, professional terminology.
+- NEVER write "the lecture", "the slide", "the slides", "the text", "the material", "the concept", "according to", "as presented" or any similar reference to the source. The reader must not be able to tell that a source document exists.
+- Never use stems such as "Which concept is most relevant to this patient?" or "Which of the following is mentioned?". Phrase stems as direct clinical evaluations, for example:
+  * "Given the patient's presentation and examination findings, what is the most appropriate next step in management?"
+  * "Which underlying pathophysiological mechanism best accounts for the observed response?"
+  * "Which criterion must be satisfied before this patient progresses to the next phase?"
+  * "Which examination finding most strongly supports the working diagnosis?"
+- No fill-in-the-blank, no true/false, no "all of the above", no negatively phrased stems ("Which is NOT...").
+
+OPTIONS
+- Exactly 4 options of similar length and grammatical form; exactly one is defensible as best.
+- Never copy sentences from the source verbatim into options; paraphrase in expert language.
+- Each distractor must target a specific, common misconception (reversed direction, wrong phase, confused related entity, correct action at the wrong time, right test for the wrong structure, threshold misapplied). No option may be obviously wrong or unrelated to the domain.
+
+EXPLANATIONS
+- 'explanation': two to four sentences giving the mechanism or reasoning that makes the correct option best.
+- 'whyOthers': array aligned with 'options'; for each distractor one sentence naming the misconception it represents and why it fails here; empty string for the correct option.
+- Explanations follow the same tone rules: no references to a lecture, slide or text.`,
+  case: `Write one realistic clinical case for a Master's-level physical therapy clinician, grounded only in the provided material.
+- 'presentation': three short paragraphs (history and referral; examination findings and relevant measures; the clinical question the clinician must resolve). Write as a case record, never as a summary of a document.
+- 'questions': four items that require reasoning through the case: mechanism behind the findings, interpretation of a measure, the most appropriate next step, and prioritisation of the plan. Mix 'mcq' (4 subtle options, answerIndex, feedback naming the misconception behind each distractor) and 'open' (modelAnswer plus 5-10 keywords a strong answer should contain).
+- Tone: authoritative, professional, domain-expert terminology. NEVER mention a lecture, slide, text or source.
+- For mcq questions set modelAnswer to '' and keywords to []; for open questions set options to [], answerIndex to 0 and feedback to ''.`,
 };
+
+const QUIZ_SYSTEM = (lang) => `You are a senior Physical Therapy professor and board examiner writing assessment items for Master's-level clinicians. Your items are known for testing clinical reasoning: mechanism, sequencing, decision-making and interpretation in realistic scenarios. You never reveal or reference the source material; you write as if examining from expertise. Use only the provided content as the basis of truth. Write all text in ${lang}.`;
 
 app.post("/api/ai", async (req, res) => {
   const { task, language, lecture, quiz } = req.body || {};
@@ -92,7 +132,9 @@ app.post("/api/ai", async (req, res) => {
     const response = await client.messages.create({
       model: "claude-opus-5",
       max_tokens: 16000,
-      system: `You are a study assistant for Master's Physical Therapy students. Use only the provided lecture content. Write all text in ${lang}. Be clear, accurate and concise.`,
+      system: task === "quiz" || task === "case"
+        ? QUIZ_SYSTEM(lang)
+        : `You are a study assistant for Master's Physical Therapy students. Use only the provided lecture content. Write all text in ${lang}. Be clear, accurate and concise.`,
       messages: [{ role: "user", content: `${instruction}\n\nLecture title: ${lecture.title}\n\n${content}` }],
       output_config: { format: { type: "json_schema", schema: SCHEMAS[task] } },
     });
