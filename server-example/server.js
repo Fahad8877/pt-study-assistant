@@ -40,10 +40,11 @@ app.use(express.json({ limit: "80mb" })); // page images are sent inline as base
 const SYSTEM_PROMPT = `You are an elite medical education expert and academic tutor. Your objective is to process the uploaded presentation/document with 100% factual accuracy and output a clear, highly structured, concise learning guide comprising a High-Yield Summary, Clinical Cases, and Practice Questions.
 
 CRITICAL PROCESSING RULES:
-1. NO HALLUCINATIONS OR EXTRA ASSUMPTIONS: Ground all medical facts, numbers, dosages, and guidelines strictly in the provided document.
-2. CONCISE & HIGH-YIELD: Avoid wordy explanations. Use clear subheadings, bullet points, and comparative tables.
-3. BILINGUAL TERMS: Present scientific/medical terms in English inside parentheses right after their Arabic translation.
-4. COMPLETE STRUCTURE: Always return the output divided into three distinct, beautifully formatted sections:
+1. NO STRUCTURAL OR HEADER HALLUCINATIONS: Structural header words, slide section titles, layout labels, or metadata (e.g., 'Categories', 'Overview', 'Slide 1', 'Introduction', 'Objectives', 'Table of Contents') MUST NEVER be treated as medical diagnoses, clinical findings, or question answer options.
+2. MEDICAL GROUNDING: Ground all medical facts, percentages, numbers, dosages, and guidelines strictly in the clinical content of the provided document.
+3. CONCISE & HIGH-YIELD: Avoid wordy explanations. Use clear subheadings, bullet points, and comparative tables.
+4. BILINGUAL TERMS: Present scientific/medical terms in English inside parentheses right after their Arabic translation.
+5. COMPLETE STRUCTURE: Always return the output divided into three distinct, beautifully formatted sections:
    - Section 1: Summary (الملخص المفهوم والمختصر)
    - Section 2: Clinical Cases (الحالات السريرية)
    - Section 3: Practice Questions & Rationales (الأسئلة والحلول الشارحة)`;
@@ -73,7 +74,7 @@ Never reference the lecture, slides or document in the case text; write as a cli
 const MODULE_C = (count) => `MODULE C — Board-Style Practice Questions (أسئلة مقتبسة من الملف)
 Return exactly ${count} multiple-choice questions in "questions", mapped directly to the document:
 - "scenario": a short clinical vignette when appropriate (empty for conceptual items); "question": a clear clinical or conceptual stem.
-- "options": exactly 4 (A–D as plain text without letters); "answerIndex": the correct option.
+- "options": exactly 4 (A–D as plain text without letters) containing ONLY valid medical terms, concepts, values or clinical answers — never a slide heading, section label or layout word; "answerIndex": the correct option.
 - "explanation": a detailed rationale for why the correct answer is right.
 - "whyOthers": array aligned with options — for each distractor why it is wrong (empty string for the correct one).
 - Test mechanism, interpretation, sequencing and decision-making; distractors target common misconceptions; never copy sentences verbatim; distribute items across the whole document.`;
@@ -138,9 +139,12 @@ const SCHEMA_CASES = {
 function documentBlocks(lecture, images) {
   const bySlide = new Map();
   (images || []).forEach((im) => { if (!bySlide.has(im.slide)) bySlide.set(im.slide, []); bySlide.get(im.slide).push(im); });
-  const blocks = [{ type: "text", text: `# ${lecture.title}\n\nThe document follows, one block per slide/page (title, bullet hierarchy, tables, speaker notes), each followed by its rendered image(s) when available. Treat images as authoritative for tables, diagrams, flowcharts and figures.` }];
+  const layoutLabels = (lecture.slides || []).filter((s) => s.layoutTitle).map((s) => `"${s.title}" (slide/page ${s.number})`);
+  const preface = `# ${lecture.title}\n\nThe document follows, one block per slide/page (title, bullet hierarchy, tables, speaker notes), each followed by its rendered image(s) when available. Treat images as authoritative for tables, diagrams, flowcharts and figures.` +
+    (layoutLabels.length ? `\n\nLAYOUT METADATA (structural labels only — NOT medical content, never to be used as terms, findings or answer options): ${layoutLabels.join(", ")}.` : "");
+  const blocks = [{ type: "text", text: preface }];
   for (const s of lecture.slides || []) {
-    blocks.push({ type: "text", text: s.markdown || `## ${s.title}` });
+    blocks.push({ type: "text", text: s.markdown || (s.layoutTitle ? `## Slide ${s.number} — [layout label: ${s.title}]` : `## ${s.title}`) });
     for (const im of bySlide.get(s.number) || []) {
       blocks.push({ type: "text", text: `[${im.kind === "page" ? "Rendered page" : "Figure"} — slide/page ${s.number}]` });
       blocks.push({ type: "image", source: { type: "base64", media_type: im.mediaType || "image/jpeg", data: im.data } });

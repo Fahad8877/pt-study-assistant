@@ -214,7 +214,7 @@
     let segments;
     if (Array.isArray(data.slides) && data.slides.length) {
       segments = data.slides.map((s) => ({
-        number: s.number, title: s.title, text: window.Parsers.normalize(s.text || ""),
+        number: s.number, title: s.title, layoutTitle: !!s.layoutTitle, text: window.Parsers.normalize(s.text || ""),
         markdown: s.markdown || "", tables: s.tables || [], notes: s.notes || "", imageCount: s.imageCount || 0,
       })).filter((s) => s.text);
     } else if (Array.isArray(data.parts)) {

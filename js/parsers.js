@@ -15,6 +15,32 @@
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   }
 
+  /**
+   * Presentation layout metadata vs. medical substance.
+   * Layout labels are structural (section titles, navigation, numbering) and must never be
+   * treated as clinical entities, definitions or answer options downstream.
+   */
+  const LAYOUT_WORDS = "categories|category|overview|introduction|intro|background|objectives?|learning objectives?|aims?|goals?|outline|contents?|table of contents|agenda|summary|conclusions?|references?|reading|further reading|thank you|thanks|questions?|q ?& ?a|discussion|notes?|key points?|take[- ]home( messages?| points?)?|review|recap|definitions?|terminology|general|topics?|content|main points?|end|the end|any questions|welcome|title|subtitle|section|part|chapter|unit|lecture|module|week|session|slide|page|continued|cont\\.?'?d?|cont|next|previous|appendix";
+  const LAYOUT_LABEL_RE = new RegExp(`^\\s*(?:(?:${LAYOUT_WORDS})\\s*(?:[:\\-–—]\\s*)?(?:\\d+|[ivx]+|[a-z])?\\s*(?:of\\s+\\d+)?|\\d+\\s*(?:/|of)\\s*\\d+|\\d+)\\s*[.:)]?\\s*$`, "i");
+  const LAYOUT_PREFIX_RE = new RegExp(`^\\s*(?:${LAYOUT_WORDS})\\s*(?:\\d+)?\\s*[:\\-–—]\\s*`, "i");
+
+  /** True when a line is a structural/layout label with no medical substance. */
+  const AUTHOR_META_RE = /^(?:master|bachelor|doctor|phd|msc|bsc|dr\.?|prof\.?|professor|presented by|prepared by|by:|department of|dept\.? of|faculty of|college of|school of|university|institute|course|instructor|lecturer|academic year|semester|date:|\d{1,2}\/\d{1,2}\/\d{2,4})\b/i;
+  function isLayoutLabel(text) {
+    const t = String(text || "").trim();
+    if (!t) return true;
+    if (LAYOUT_LABEL_RE.test(t)) return true;
+    if (AUTHOR_META_RE.test(t) && t.split(/\s+/).length <= 8) return true; // course / author / affiliation lines
+    // two-word generic headings such as "General Overview", "Course Objectives", "Lecture Outline"
+    const words = t.toLowerCase().replace(/[^a-z\s]/g, "").trim().split(/\s+/);
+    if (words.length <= 3 && words.every((w) => new RegExp(`^(?:${LAYOUT_WORDS}|course|of|the|and|to)$`, "i").test(w))) return true;
+    return false;
+  }
+  /** Strips a leading layout prefix ("Categories: ...", "Summary - ...") from a content line. */
+  function stripLayoutPrefix(text) {
+    return String(text || "").replace(LAYOUT_PREFIX_RE, "").trim();
+  }
+
   const LIMITS = {
     maxRenderedPages: 60,   // PDF pages rendered to images
     maxImagesPerSlide: 4,   // PPTX pictures kept per slide
@@ -101,11 +127,11 @@
         imageCount = 1;
       }
 
-      const text = cleanLines.join("\n");
-      slides.push({
-        number: p, title, text, bullets, tables: [], notes: "", imageCount,
-        markdown: slideMarkdown({ number: p, title, bullets, tables: [], notes: "" }, "Page"),
-      });
+      const record = { number: p, title, text: "", bullets, tables: [], notes: "", imageCount };
+      finalizeContent(record);
+      record.text = [record.title].concat(record.bullets.map((b) => b.text)).join("\n");
+      record.markdown = slideMarkdown(record, "Page");
+      slides.push(record);
       if (onProgress) onProgress(p, pdf.numPages);
     }
     return { slides, images, units: pdf.numPages, unitType: "pages" };
@@ -190,7 +216,17 @@
       result.title = result.bullets.shift().text;
     }
     if (!result.title) result.title = `Slide ${number}`;
+    finalizeContent(result);
     return result;
+  }
+
+  /** Marks layout-only titles and removes layout labels from the content bullets (numbers and substance are kept). */
+  function finalizeContent(slide) {
+    slide.layoutTitle = isLayoutLabel(slide.title);
+    slide.bullets = slide.bullets
+      .filter((b) => !isLayoutLabel(b.text))
+      .map((b) => ({ level: b.level, text: stripLayoutPrefix(b.text) }))
+      .filter((b) => b.text);
   }
 
   function relsOf(zip, slidePath) {
@@ -279,7 +315,8 @@
   /* ---------- structured output ---------- */
 
   function slideMarkdown(s, unit) {
-    const lines = [`## ${unit} ${s.number}: ${s.title}`];
+    // Layout-only titles are annotated so the model never mistakes them for clinical content.
+    const lines = [s.layoutTitle ? `## ${unit} ${s.number} — [layout label, not medical content: ${s.title}]` : `## ${unit} ${s.number}: ${s.title}`];
     s.bullets.forEach((b) => { lines.push(`${"  ".repeat(Math.min(b.level, 4))}- ${b.text}`); });
     s.tables.forEach((rows, i) => {
       const width = Math.max(...rows.map((r) => r.length));
@@ -345,9 +382,10 @@
         firstLine = firstLine.toLowerCase().replace(/(^|\s)([a-z])/g, (m, sp, ch) => sp + ch.toUpperCase());
       }
       const title = firstLine.length <= 70 ? firstLine : firstLine.slice(0, 60).replace(/\s+\S*$/, "") + "…";
-      return { index, number: p.number, title, text: p.text, markdown: p.markdown || "", tables: p.tables || [], notes: p.notes || "" };
+      const layoutTitle = typeof p.layoutTitle === "boolean" ? p.layoutTitle : isLayoutLabel(title);
+      return { index, number: p.number, title, layoutTitle, text: p.text, markdown: p.markdown || "", tables: p.tables || [], notes: p.notes || "" };
     });
   }
 
-  window.Parsers = { parseFile, detectType, titleFromFilename, normalize, segments, toMarkdown, LIMITS };
+  window.Parsers = { parseFile, detectType, titleFromFilename, normalize, segments, toMarkdown, isLayoutLabel, stripLayoutPrefix, LIMITS };
 })();

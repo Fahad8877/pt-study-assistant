@@ -23,7 +23,7 @@
   function slidesOf(lecture, only) {
     return window.Parsers.segments(lecture)
       .filter((s) => !only || only.includes(s.index))
-      .map((s) => ({ number: s.number, title: s.title, markdown: s.markdown || `## ${s.title}\n${s.text}`, notes: s.notes || "", tables: s.tables || [] }));
+      .map((s) => ({ number: s.number, title: s.title, layoutTitle: !!s.layoutTitle, markdown: s.markdown || `## ${s.title}\n${s.text}`, notes: s.notes || "", tables: s.tables || [] }));
   }
 
   async function imagesOf(lecture, only) {

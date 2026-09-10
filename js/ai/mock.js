@@ -14,7 +14,8 @@
     "into onto over under again further once here there between through during before after above below up down " +
     "out off about also often usually typically generally include includes including such via per within without " +
     "one two three four five first second third e.g i.e etc slide slides lecture objectives objective module master " +
-    "learning describe identify outline perform interpret summary").split(/\s+/));
+    "learning describe identify outline perform interpret summary categories category overview introduction contents " +
+    "agenda conclusion references chapter unit section topic topics page").split(/\s+/));
 
   const FRAMES = {
     en: {
@@ -98,6 +99,8 @@
       seg.text.split(/\n+/).forEach((rawLine) => {
         // Bullet markers and ALL-CAPS lines are common in real slide decks.
         let line = rawLine.replace(/^[\s•·\-–—*▪◦o]+\s*/, "").trim();
+        if (window.Parsers.isLayoutLabel(line)) return;          // "Categories", "Slide 3", "Overview"
+        line = window.Parsers.stripLayoutPrefix(line);           // "Categories: X" -> "X"
         const letters = line.replace(/[^A-Za-z]/g, "");
         if (letters.length >= 6 && letters === letters.toUpperCase()) line = cap(line.toLowerCase());
         line.split(/(?<=[.!?])\s+(?=[A-Z"'(])/).forEach((raw) => {
@@ -137,6 +140,7 @@
 
   function goodTerm(term) {
     const w = term.trim().split(/\s+/);
+    if (window.Parsers.isLayoutLabel(term)) return false; // "Categories", "Overview", "Slide 3" are layout, not medicine
     return w.length >= 1 && w.length <= 5 && !/\d/.test(term) && !BAD_TERM_WORDS.test(term) && /[a-z]/.test(term);
   }
   function cleanTerm(term) { return term.replace(/^(the|a|an)\s+/i, "").trim(); }
@@ -401,6 +405,7 @@
   const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
   const ANTONYM_PAIRS = [
     ["should be avoided", "is recommended"], ["should not", "should"], ["not recommended", "recommended"], ["non-contact", "contact"],
+    ["lower blood pressure", "raise blood pressure"], ["most common", "least common"], ["longer life expectancy", "shorter life expectancy"],
     ["at least", "at most"], ["intra-articular", "extra-articular"], ["closed kinetic chain", "open kinetic chain"],
     ["anterior", "posterior"], ["medial", "lateral"], ["internal", "external"], ["flexion", "extension"], ["increase", "decrease"],
     ["increases", "decreases"], ["increased", "decreased"], ["more", "less"], ["higher", "lower"], ["greater", "smaller"],
@@ -460,6 +465,7 @@
     if (!m || m.index < 4) return null;
     const subj = text.slice(0, m.index).trim().replace(/[,;:]$/, "");
     if (/\d/.test(subj) || /^(approximately|about|most|many|some|several|patients?|it|this|these|those|there)\b/i.test(subj)) return null;
+    if (window.Parsers.isLayoutLabel(subj)) return null;
     return subj.length >= 4 && subj.length <= 70 && subj.split(/\s+/).length <= 10 ? lowerFirst(subj) : null;
   }
 
@@ -601,12 +607,13 @@
 
     // belongs / heading: fallback for bullet-style slides (short points under a slide heading)
     const segTitle = (i) => (a.segments[i] && a.segments[i].title) || "";
-    const GENERIC_SLIDE_RE = /^(unit|lecture|chapter|module|week|session|part|summary|conclusion|learning objectives?|objectives?|outline|contents?|agenda|references?|reading|thank you|questions?|introduction)\b/i;
     const bySegFrag = {};
     fragments.forEach((s) => {
       const title = segTitle(s.seg);
-      if (!title || title.length > 70 || GENERIC_SLIDE_RE.test(title) || s.text.toLowerCase() === title.toLowerCase()) return;
-      if (s.seg === 0 && title.toLowerCase() === String(a.title || "").toLowerCase()) return; // title slide
+      const seg = a.segments[s.seg];
+      // Layout-only headings ("Categories", "Overview", "Objectives", "Slide 3") are never clinical entities.
+      if (!title || title.length > 70 || (seg && seg.layoutTitle) || window.Parsers.isLayoutLabel(title) || s.text.toLowerCase() === title.toLowerCase()) return;
+      if (s.seg === 0) return; // title slide: course / author / affiliation lines are not clinical content
       (bySegFrag[s.seg] = bySegFrag[s.seg] || []).push(s);
     });
     const fragSegs = Object.keys(bySegFrag).map(Number);
