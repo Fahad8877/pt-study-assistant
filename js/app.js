@@ -30,6 +30,52 @@
   }
   function spinner(msg) { return `<div class="progress"><div class="spinner"></div><span>${esc(msg)}</span></div>`; }
 
+  /** Minimal, safe Markdown → HTML (headings, lists, tables, bold/italic/code, quotes). All text is escaped first. */
+  function renderMarkdown(md) {
+    const inline = (s) => esc(s)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+    const lines = String(md || "").replace(/\r/g, "").split("\n");
+    const out = [];
+    let i = 0;
+    const listStack = []; // levels of open <ul>/<ol>
+    const closeLists = (toLevel) => { while (listStack.length > toLevel) out.push(listStack.pop() === "ol" ? "</ol>" : "</ul>"); };
+    while (i < lines.length) {
+      const line = lines[i];
+      const h = line.match(/^(#{1,6})\s+(.*)$/);
+      const li = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+      if (h) { closeLists(0); const lvl = Math.min(6, h[1].length + 1); out.push(`<h${lvl}>${inline(h[2])}</h${lvl}>`); i++; continue; }
+      if (/^\s*\|.*\|\s*$/.test(line)) {
+        closeLists(0);
+        const rows = [];
+        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { rows.push(lines[i].trim().slice(1, -1).split("|").map((c) => c.trim())); i++; }
+        const body = rows.filter((r) => !r.every((c) => /^:?-{2,}:?$/.test(c)));
+        if (body.length) {
+          out.push("<div class=\"table-wrap\"><table>");
+          body.forEach((r, ri) => { out.push("<tr>" + r.map((c) => `<${ri === 0 ? "th" : "td"}>${inline(c)}</${ri === 0 ? "th" : "td"}>`).join("") + "</tr>"); });
+          out.push("</table></div>");
+        }
+        continue;
+      }
+      if (li) {
+        const level = Math.floor(li[1].replace(/\t/g, "  ").length / 2) + 1;
+        const kind = /\d/.test(li[2]) ? "ol" : "ul";
+        while (listStack.length > level) out.push(listStack.pop() === "ol" ? "</ol>" : "</ul>");
+        while (listStack.length < level) { out.push(kind === "ol" ? "<ol>" : "<ul>"); listStack.push(kind); }
+        out.push(`<li>${inline(li[3])}</li>`); i++; continue;
+      }
+      closeLists(0);
+      if (/^\s*>\s?/.test(line)) { out.push(`<blockquote>${inline(line.replace(/^\s*>\s?/, ""))}</blockquote>`); i++; continue; }
+      if (!line.trim()) { i++; continue; }
+      const para = [line];
+      while (i + 1 < lines.length && lines[i + 1].trim() && !/^(#{1,6}\s|\s*([-*+]|\d+[.)])\s|\s*\||\s*>)/.test(lines[i + 1])) { para.push(lines[++i]); }
+      out.push(`<p>${inline(para.join(" "))}</p>`); i++;
+    }
+    closeLists(0);
+    return out.join("\n");
+  }
+
   const ICONS = {
     upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
     lectures: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
@@ -143,10 +189,14 @@
     if (!window.Parsers.detectType(file)) { status.innerHTML = `<div class="alert alert-error">${esc(t("upload.error.type"))}</div>`; return; }
     status.innerHTML = spinner(t("upload.reading"));
     try {
-      const parsed = await window.Parsers.parseFile(file);
+      const parsed = await window.Parsers.parseFile(file, (done, total) => {
+        const s = document.getElementById("upload-status");
+        if (s) s.innerHTML = spinner(`${t("upload.reading")} ${done} / ${total}`);
+      });
       await createLecture({
         title: window.Parsers.titleFromFilename(file.name),
-        fileName: file.name, fileType: parsed.fileType, units: parsed.units, unitType: parsed.unitType, text: parsed.text, parts: parsed.parts,
+        fileName: file.name, fileType: parsed.fileType, units: parsed.units, unitType: parsed.unitType, text: parsed.text,
+        parts: parsed.parts, slides: parsed.slides, images: parsed.images,
       });
     } catch (err) {
       console.error(err);
@@ -159,19 +209,30 @@
     const status = document.getElementById("upload-status");
     if (status) status.innerHTML = spinner(t("upload.analyzing"));
     const text = data.text.slice(0, window.APP_CONFIG.maxStoredChars);
-    // Keep each slide/page separately so quizzes can be scoped to specific slides.
-    const segments = Array.isArray(data.parts)
-      ? data.parts.map((p, i) => ({ number: i + 1, text: window.Parsers.normalize(p || "") })).filter((s) => s.text)
-      : undefined;
+    // Keep each slide/page as a structured record (title, bullet hierarchy as
+    // Markdown, tables, speaker notes) so nothing is dropped downstream.
+    let segments;
+    if (Array.isArray(data.slides) && data.slides.length) {
+      segments = data.slides.map((s) => ({
+        number: s.number, title: s.title, text: window.Parsers.normalize(s.text || ""),
+        markdown: s.markdown || "", tables: s.tables || [], notes: s.notes || "", imageCount: s.imageCount || 0,
+      })).filter((s) => s.text);
+    } else if (Array.isArray(data.parts)) {
+      segments = data.parts.map((p, i) => ({ number: i + 1, text: window.Parsers.normalize(p || "") })).filter((s) => s.text);
+    }
     const lecture = {
       id: window.Store.newId(),
       title: data.title, fileName: data.fileName, fileType: data.fileType,
       units: data.units, unitType: data.unitType, text, segments,
+      imageCount: Array.isArray(data.images) ? data.images.length : 0,
       wordCount: (text.match(/\S+/g) || []).length,
       createdAt: Date.now(),
     };
     window.Store.upsert(lecture);
     window.Store.setLastId(lecture.id);
+    if (Array.isArray(data.images) && data.images.length) {
+      try { await window.Images.put(lecture.id, data.images); } catch (e) { console.warn("Image store unavailable", e); }
+    }
     try {
       await ensureAnalysis(lecture);
       toast(t("upload.success"));
@@ -197,7 +258,7 @@
 
     view.innerHTML = `<div class="page-header"><h1>${esc(t("lectures.title"))}</h1><p>${esc(t("dash.recentSub"))}</p></div>${items}`;
     view.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => {
-      if (confirm(t("lectures.confirmDelete"))) { window.Store.remove(b.getAttribute("data-del")); renderLectures(); }
+      if (confirm(t("lectures.confirmDelete"))) { const id = b.getAttribute("data-del"); window.Store.remove(id); window.Images.remove(id); renderLectures(); }
     }));
   }
 
@@ -269,7 +330,10 @@
     }
     if (!box.isConnected || lang !== window.I18N.lang || token !== renderToken) return; // view replaced meanwhile
 
-    const sections = (a.sections || []).map((s) => `
+    // Module A: a Markdown high-yield summary (API provider) or the built-in synthesis sections (mock).
+    const sections = a.summaryMarkdown
+      ? `<section class="synth md" dir="auto">${renderMarkdown(a.summaryMarkdown)}</section>`
+      : (a.sections || []).map((s) => `
       <section class="synth">
         <h3>${esc(s.title)}</h3>
         <p class="lead" dir="auto">${esc(s.lead)}</p>
@@ -280,7 +344,17 @@
     const terms = (a.terms || []).length
       ? `<section class="synth"><h3>${esc(t("lecture.terminology"))}</h3><dl class="term-list">${a.terms.map((x) => `<div dir="auto"><dt>${esc(x.term)}</dt><dd>${esc(x.definition)}</dd></div>`).join("")}</dl></section>` : "";
 
-    const vignettes = cases.map((c, i) => `
+    // Module B: structured vignettes (API provider) or the built-in case presentation (mock).
+    const field = (label, value) => value ? `<div class="case-field"><dt>${esc(t(label))}</dt><dd dir="auto">${esc(value)}</dd></div>` : "";
+    const vignettes = cases.map((c, i) => c.chiefComplaint ? `
+      <article class="vignette">
+        <h3>${esc(t("lecture.case"))} ${i + 1}${c.title ? ` · <span dir="auto">${esc(c.title)}</span>` : ""}</h3>
+        <dl class="case-fields">
+          ${field("case.demographics", c.demographics)}${field("case.cc", c.chiefComplaint)}${field("case.hpi", c.hpi)}${field("case.vitals", c.vitals)}${field("case.exam", c.exam)}
+        </dl>
+        ${(c.reasoning || []).length ? `<h4>${esc(t("lecture.reasoning"))}</h4><ol>${c.reasoning.map((r) => `<li dir="auto">${esc(r)}</li>`).join("")}</ol>` : ""}
+        ${(c.plan || []).length ? `<h4>${esc(t("case.plan"))}</h4><ol>${c.plan.map((r) => `<li dir="auto">${esc(r)}</li>`).join("")}</ol>` : ""}
+      </article>` : `
       <article class="vignette">
         <h3>${esc(t("lecture.case"))} ${i + 1}</h3>
         ${(c.presentation || []).map((p) => `<p dir="auto">${esc(p)}</p>`).join("")}

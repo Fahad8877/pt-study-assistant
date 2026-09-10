@@ -58,4 +58,50 @@
   }
 
   window.Store = { all, get, upsert, remove, setLastId, getLastId, newId };
+
+  /* ---------- page / slide images (IndexedDB; too large for localStorage) ---------- */
+  const DB = "pt-study-assistant";
+  const STORE_IMG = "images";
+  const memory = new Map();
+
+  function openDb() {
+    return new Promise((resolve) => {
+      if (!window.indexedDB) return resolve(null);
+      try {
+        const req = indexedDB.open(DB, 1);
+        req.onupgradeneeded = () => { req.result.createObjectStore(STORE_IMG); };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      } catch (e) { resolve(null); }
+    });
+  }
+  function tx(db, mode, fn) {
+    return new Promise((resolve) => {
+      const t = db.transaction(STORE_IMG, mode);
+      const req = fn(t.objectStore(STORE_IMG));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(undefined);
+    });
+  }
+
+  window.Images = {
+    /** images: [{ slide, kind, dataUrl }] */
+    async put(lectureId, images) {
+      memory.set(lectureId, images);
+      const db = await openDb();
+      if (db) await tx(db, "readwrite", (s) => s.put(images, lectureId));
+    },
+    async get(lectureId) {
+      if (memory.has(lectureId)) return memory.get(lectureId);
+      const db = await openDb();
+      const v = db ? await tx(db, "readonly", (s) => s.get(lectureId)) : null;
+      if (v) memory.set(lectureId, v);
+      return v || [];
+    },
+    async remove(lectureId) {
+      memory.delete(lectureId);
+      const db = await openDb();
+      if (db) await tx(db, "readwrite", (s) => s.delete(lectureId));
+    },
+  };
 })();

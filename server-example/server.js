@@ -1,161 +1,206 @@
 /**
- * Example backend for connecting the PT Study Assistant to the real Claude API.
+ * PT Study Assistant — AI backend (Claude API, multimodal, three-module generation).
  *
- * Not used by the prototype by default (the app runs fully in the browser with
- * mock responses). To enable it:
+ * Setup (Node.js 18+):
+ *   npm install @anthropic-ai/sdk express cors
+ *   export ANTHROPIC_API_KEY=sk-ant-...        (or run `ant auth login`)
+ *   node server.js
+ * Then set aiProvider: "api" in js/config.js (endpoint http://localhost:3000/api/generate).
  *
- *   1. Install Node.js 18+ and run, inside this folder:
- *        npm install @anthropic-ai/sdk express cors
- *   2. Export your key:  ANTHROPIC_API_KEY=sk-ant-...   (or run `ant auth login`)
- *   3. Start:            node server.js
- *   4. In js/config.js set  aiProvider: "api"  and keep apiEndpoint at
- *      http://localhost:3000/api/ai
+ * Optional environment:
+ *   CLAUDE_MODEL   default "claude-opus-5". Sampling temperature is only accepted by the
+ *                  4.6-generation models (claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5);
+ *                  on claude-opus-5 / sonnet-5 / fable the API rejects `temperature`, so the
+ *                  server applies it only when the chosen model supports it.
+ *   PORT           default 3000
  *
- * The endpoint accepts { task, language, lecture: { title, text } } and returns
- * JSON in exactly the shape js/ai/api.js documents, using structured outputs
- * so the response always matches the schema.
+ * POST /api/generate
+ *   { language: "ar"|"en", modules: ["summary","cases","questions"],
+ *     lecture: { title, slides: [{ number, title, markdown, notes, tables }] },
+ *     images: [{ slide, kind, mediaType, data }],     // base64 JPEG page renders / figures
+ *     questions: { count, slideNumbers } }
+ *   -> { summary: { markdown, pearls, terms }, cases: [...], questions: [...] }
  */
 const express = require("express");
 const cors = require("cors");
 const Anthropic = require("@anthropic-ai/sdk");
 
 const client = new Anthropic();
+const MODEL = process.env.CLAUDE_MODEL || "claude-opus-5";
+const SUPPORTS_TEMPERATURE = /claude-(opus|sonnet)-4-6|claude-haiku-4-5/.test(MODEL);
+const MAX_TOKENS = 16000;            // well above the 4000 minimum; keeps long guides intact
+const TEMP_EXTRACTION = 0.2;         // summary + questions (factual extraction)
+const TEMP_CASES = 0.3;              // clinical case creation
+
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "80mb" })); // page images are sent inline as base64
 
-const SCHEMAS = {
-  analyze: {
-    type: "object",
-    properties: {
-      sections: { type: "array", items: { type: "object", properties: {
-        key: { type: "string", enum: ["overview", "mechanisms", "assessment", "management"] },
-        title: { type: "string" },
-        lead: { type: "string" },
-        paragraphs: { type: "array", items: { type: "string" } },
-      }, required: ["key", "title", "lead", "paragraphs"], additionalProperties: false } },
-      pearls: { type: "array", items: { type: "string" } },
-      explanation: { type: "array", items: { type: "string" } },
-      summary: { type: "array", items: { type: "string" } },
-      concepts: { type: "array", items: { type: "object", properties: { title: { type: "string" }, detail: { type: "string" } }, required: ["title", "detail"], additionalProperties: false } },
-      terms: { type: "array", items: { type: "object", properties: { term: { type: "string" }, definition: { type: "string" } }, required: ["term", "definition"], additionalProperties: false } },
-    },
-    required: ["sections", "pearls", "explanation", "summary", "concepts", "terms"],
-    additionalProperties: false,
-  },
-  quiz: {
-    type: "object",
-    properties: {
-      questions: { type: "array", items: { type: "object", properties: {
-        scenario: { type: "string" },
-        question: { type: "string" },
-        options: { type: "array", items: { type: "string" } },
-        answerIndex: { type: "integer" },
-        explanation: { type: "string" },
-        whyOthers: { type: "array", items: { type: "string" } },
-      }, required: ["scenario", "question", "options", "answerIndex", "explanation", "whyOthers"], additionalProperties: false } },
-    },
-    required: ["questions"],
-    additionalProperties: false,
-  },
-  case: {
-    type: "object",
-    properties: {
-      title: { type: "string" },
-      presentation: { type: "array", items: { type: "string" } },
-      questions: { type: "array", items: { type: "object", properties: {
-        type: { type: "string", enum: ["mcq", "open"] },
-        question: { type: "string" },
-        options: { type: "array", items: { type: "string" } },
-        answerIndex: { type: "integer" },
-        feedback: { type: "string" },
-        modelAnswer: { type: "string" },
-        keywords: { type: "array", items: { type: "string" } },
-      }, required: ["type", "question", "options", "answerIndex", "feedback", "modelAnswer", "keywords"], additionalProperties: false } },
-    },
-    required: ["title", "presentation", "questions"],
-    additionalProperties: false,
-  },
+/* ---------- exact system prompt (embedded verbatim) ---------- */
+const SYSTEM_PROMPT = `You are an elite medical education expert and academic tutor. Your objective is to process the uploaded presentation/document with 100% factual accuracy and output a clear, highly structured, concise learning guide comprising a High-Yield Summary, Clinical Cases, and Practice Questions.
+
+CRITICAL PROCESSING RULES:
+1. NO HALLUCINATIONS OR EXTRA ASSUMPTIONS: Ground all medical facts, numbers, dosages, and guidelines strictly in the provided document.
+2. CONCISE & HIGH-YIELD: Avoid wordy explanations. Use clear subheadings, bullet points, and comparative tables.
+3. BILINGUAL TERMS: Present scientific/medical terms in English inside parentheses right after their Arabic translation.
+4. COMPLETE STRUCTURE: Always return the output divided into three distinct, beautifully formatted sections:
+   - Section 1: Summary (الملخص المفهوم والمختصر)
+   - Section 2: Clinical Cases (الحالات السريرية)
+   - Section 3: Practice Questions & Rationales (الأسئلة والحلول الشارحة)`;
+
+/* ---------- module specifications ---------- */
+const LANGUAGE_RULE = {
+  ar: "Write explanations in clear Arabic. Every scientific/medical term appears in English inside parentheses right after its Arabic translation, e.g. احتشاء عضلة القلب (Myocardial Infarction).",
+  en: "Write in clear professional English. Keep scientific/medical terms precise.",
 };
 
-const INSTRUCTIONS = {
-  analyze: `Write as a Senior Physical Therapy Specialist and Professor synthesising the ENTIRE document as one body of knowledge (never page by page, never "slide 3 says").
-- 'sections': exactly four, in this order and with these keys: overview (clinical picture, definitions, epidemiology, scope), mechanisms (pathophysiology, biomechanics, causal chains that explain the presentation), assessment (examination, tests and measures and how findings are interpreted against the mechanism), management (interventions, precautions, contraindications and the staged, criteria-based progression). Each section has a title, a one-sentence expert 'lead' stating the clinical principle, and 2-4 paragraphs of dense professional prose that connect facts into reasoning.
-- 'pearls': 6-10 one-line clinical pearls a specialist would want a Master's student to carry into the clinic.
-- 'terms': 6-12 key terms with precise definitions. 'concepts': 4-6 core entities with a one-sentence detail. 'summary': 5-8 key points. 'explanation': a 3-paragraph plain-language version for a student.
-- Tone: authoritative, precise, domain-expert terminology. Never reference the lecture, slides, text or source; write from expertise, grounded only in the provided content.`,
-  quiz: `Write a rigorous board-style assessment. Every item must evaluate mastery, not recall.
+const MODULE_A = `MODULE A — Concise High-Yield Summary (شرح مفهوم وغير مطول)
+Return Markdown in "summary.markdown": a clean, structured, non-verbose study summary of the WHOLE document (all slides/pages together, never slide by slide).
+- Style: high-yield bullets under clear subheadings; no filler, no long introductions.
+- Cover, where the document supports it: Pathophysiology & Etiology; Diagnostic Criteria & Gold-Standard Tests; Clinical Features & Key Symptoms; First-line Treatment & Management Steps; and comparison tables (Markdown tables) for differential diagnoses, syndromes, drug classes, orthoses or scales.
+- Preserve every number, percentage, threshold, dose, scale grade and timeline from the document; reproduce tables and figures' data from the provided images.
+- "summary.pearls": 6-10 one-line high-yield points. "summary.terms": 8-15 key terms with precise definitions (bilingual as per the language rule).`;
 
-CONTENT SCOPE
-- Ground every item in the provided material only. Do not introduce facts, values or recommendations that the material does not support.
-- Distribute items across all provided slides so later slides are covered as much as early ones.
+const MODULE_B = `MODULE B — Real-World Clinical Cases (حالات سريرية)
+Return 2-4 vignettes in "cases", each strictly grounded in the document:
+- "demographics" (age, sex, relevant context) and "chiefComplaint" (CC).
+- "hpi" (history of present illness), "vitals", and "exam" (relevant physical examination / lab / measurement findings — use the document's tests, scales and values).
+- "reasoning": step-by-step clinical reasoning (array of steps) explaining WHY the diagnosis/classification is correct based on the document.
+- "plan": step-by-step management plan (array), each step justified by the document.
+- "questions": 4 interactive items for a student: mix of "mcq" (4 subtle options, answerIndex, feedback naming the misconception behind each distractor) and "open" (modelAnswer plus 5-10 keywords). For mcq set modelAnswer "" and keywords []; for open set options [], answerIndex 0, feedback "".
+Never reference the lecture, slides or document in the case text; write as a clinical record.`;
 
-RIGOR AND DEPTH (each item targets one of these; use all of them across the set)
-- Mechanism: why a response, sign or outcome occurs (pathophysiology, biomechanics, physiology).
-- Sequencing and progression: what must be achieved before advancing, what comes next and why.
-- Decision-making: the most appropriate next step, intervention, precaution or contraindication for a specific patient.
-- Interpretation: what a measured value, test result or observed response means for management.
-- Discrimination: which of several closely related entities, tests or interventions fits the situation.
+const MODULE_C = (count) => `MODULE C — Board-Style Practice Questions (أسئلة مقتبسة من الملف)
+Return exactly ${count} multiple-choice questions in "questions", mapped directly to the document:
+- "scenario": a short clinical vignette when appropriate (empty for conceptual items); "question": a clear clinical or conceptual stem.
+- "options": exactly 4 (A–D as plain text without letters); "answerIndex": the correct option.
+- "explanation": a detailed rationale for why the correct answer is right.
+- "whyOthers": array aligned with options — for each distractor why it is wrong (empty string for the correct one).
+- Test mechanism, interpretation, sequencing and decision-making; distractors target common misconceptions; never copy sentences verbatim; distribute items across the whole document.`;
 
-SCENARIO REQUIREMENT
-- At least two thirds of the items open with a short, realistic clinical vignette in 'scenario' (age, relevant history, key findings, stage of care). Leave 'scenario' empty only for pure mechanism items.
-
-TONE AND PHRASING
-- Write as a domain expert examining a Master's-level clinician: authoritative, precise, professional terminology.
-- NEVER write "the lecture", "the slide", "the slides", "the text", "the material", "the concept", "according to", "as presented" or any similar reference to the source. The reader must not be able to tell that a source document exists.
-- Never use stems such as "Which concept is most relevant to this patient?" or "Which of the following is mentioned?". Phrase stems as direct clinical evaluations, for example:
-  * "Given the patient's presentation and examination findings, what is the most appropriate next step in management?"
-  * "Which underlying pathophysiological mechanism best accounts for the observed response?"
-  * "Which criterion must be satisfied before this patient progresses to the next phase?"
-  * "Which examination finding most strongly supports the working diagnosis?"
-- No fill-in-the-blank, no true/false, no "all of the above", no negatively phrased stems ("Which is NOT...").
-
-OPTIONS
-- Exactly 4 options of similar length and grammatical form; exactly one is defensible as best.
-- Never copy sentences from the source verbatim into options; paraphrase in expert language.
-- Each distractor must target a specific, common misconception (reversed direction, wrong phase, confused related entity, correct action at the wrong time, right test for the wrong structure, threshold misapplied). No option may be obviously wrong or unrelated to the domain.
-
-EXPLANATIONS
-- 'explanation': two to four sentences giving the mechanism or reasoning that makes the correct option best.
-- 'whyOthers': array aligned with 'options'; for each distractor one sentence naming the misconception it represents and why it fails here; empty string for the correct option.
-- Explanations follow the same tone rules: no references to a lecture, slide or text.`,
-  case: `Write one realistic clinical case for a Master's-level physical therapy clinician, grounded only in the provided material.
-- 'presentation': three short paragraphs (history and referral; examination findings and relevant measures; the clinical question the clinician must resolve). Write as a case record, never as a summary of a document.
-- 'questions': four items that require reasoning through the case: mechanism behind the findings, interpretation of a measure, the most appropriate next step, and prioritisation of the plan. Mix 'mcq' (4 subtle options, answerIndex, feedback naming the misconception behind each distractor) and 'open' (modelAnswer plus 5-10 keywords a strong answer should contain).
-- Tone: authoritative, professional, domain-expert terminology. NEVER mention a lecture, slide, text or source.
-- For mcq questions set modelAnswer to '' and keywords to []; for open questions set options to [], answerIndex to 0 and feedback to ''.`,
+/* ---------- structured output schemas ---------- */
+const S = {
+  str: { type: "string" },
+  strArr: { type: "array", items: { type: "string" } },
+};
+const CASE_QUESTION = {
+  type: "object",
+  properties: {
+    type: { type: "string", enum: ["mcq", "open"] },
+    question: S.str, options: S.strArr, answerIndex: { type: "integer" },
+    feedback: S.str, modelAnswer: S.str, keywords: S.strArr,
+  },
+  required: ["type", "question", "options", "answerIndex", "feedback", "modelAnswer", "keywords"],
+  additionalProperties: false,
+};
+const SCHEMA_SUMMARY_QUESTIONS = {
+  type: "object",
+  properties: {
+    summary: {
+      type: "object",
+      properties: {
+        markdown: S.str, pearls: S.strArr,
+        terms: { type: "array", items: { type: "object", properties: { term: S.str, definition: S.str }, required: ["term", "definition"], additionalProperties: false } },
+      },
+      required: ["markdown", "pearls", "terms"], additionalProperties: false,
+    },
+    questions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { scenario: S.str, question: S.str, options: S.strArr, answerIndex: { type: "integer" }, explanation: S.str, whyOthers: S.strArr },
+        required: ["scenario", "question", "options", "answerIndex", "explanation", "whyOthers"], additionalProperties: false,
+      },
+    },
+  },
+  required: ["summary", "questions"], additionalProperties: false,
+};
+const SCHEMA_CASES = {
+  type: "object",
+  properties: {
+    cases: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: S.str, demographics: S.str, chiefComplaint: S.str, hpi: S.str, vitals: S.str, exam: S.str,
+          reasoning: S.strArr, plan: S.strArr, questions: { type: "array", items: CASE_QUESTION },
+        },
+        required: ["title", "demographics", "chiefComplaint", "hpi", "vitals", "exam", "reasoning", "plan", "questions"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["cases"], additionalProperties: false,
 };
 
-const QUIZ_SYSTEM = (lang) => `You are a senior Physical Therapy professor and board examiner writing assessment items for Master's-level clinicians. Your items are known for testing clinical reasoning: mechanism, sequencing, decision-making and interpretation in realistic scenarios. You never reveal or reference the source material; you write as if examining from expertise. Use only the provided content as the basis of truth. Write all text in ${lang}.`;
-
-app.post("/api/ai", async (req, res) => {
-  const { task, language, lecture, quiz } = req.body || {};
-  if (!SCHEMAS[task] || !lecture || !lecture.text) return res.status(400).json({ error: "Bad request" });
-  const lang = language === "ar" ? "Arabic" : "English";
-  // For quizzes the app sends only the selected slides and the desired question count.
-  let content = `Lecture content:\n${lecture.text}`;
-  let instruction = INSTRUCTIONS[task];
-  if (task === "quiz" && quiz && Array.isArray(quiz.slides) && quiz.slides.length) {
-    content = "Selected slides:\n" + quiz.slides.map((s) => `--- Slide ${s.number} ---\n${s.text}`).join("\n\n");
-    instruction += ` Write exactly ${quiz.count || 6} questions.`;
+/* ---------- document → multimodal content blocks ---------- */
+function documentBlocks(lecture, images) {
+  const bySlide = new Map();
+  (images || []).forEach((im) => { if (!bySlide.has(im.slide)) bySlide.set(im.slide, []); bySlide.get(im.slide).push(im); });
+  const blocks = [{ type: "text", text: `# ${lecture.title}\n\nThe document follows, one block per slide/page (title, bullet hierarchy, tables, speaker notes), each followed by its rendered image(s) when available. Treat images as authoritative for tables, diagrams, flowcharts and figures.` }];
+  for (const s of lecture.slides || []) {
+    blocks.push({ type: "text", text: s.markdown || `## ${s.title}` });
+    for (const im of bySlide.get(s.number) || []) {
+      blocks.push({ type: "text", text: `[${im.kind === "page" ? "Rendered page" : "Figure"} — slide/page ${s.number}]` });
+      blocks.push({ type: "image", source: { type: "base64", media_type: im.mediaType || "image/jpeg", data: im.data } });
+    }
   }
+  return blocks;
+}
+
+async function callClaude({ instructions, docBlocks, schema, temperature }) {
+  const params = {
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: "user", content: [{ type: "text", text: instructions }, ...docBlocks] }],
+    output_config: { format: { type: "json_schema", schema } },
+  };
+  if (SUPPORTS_TEMPERATURE) params.temperature = temperature;
+  const response = await client.messages.create(params);
+  if (response.stop_reason === "refusal") throw new Error("Model declined the request");
+  if (response.stop_reason === "max_tokens") throw new Error("Output truncated; raise MAX_TOKENS");
+  const text = response.content.find((b) => b.type === "text");
+  return JSON.parse(text.text);
+}
+
+app.get("/health", (req, res) => res.json({ ok: true, model: MODEL, temperatureSupported: SUPPORTS_TEMPERATURE }));
+
+app.post("/api/generate", async (req, res) => {
+  const { language, modules, lecture, images, questions } = req.body || {};
+  if (!lecture || !Array.isArray(lecture.slides) || !lecture.slides.length) return res.status(400).json({ error: "lecture.slides required" });
+  const wanted = new Set(Array.isArray(modules) && modules.length ? modules : ["summary", "cases", "questions"]);
+  const langRule = LANGUAGE_RULE[language === "ar" ? "ar" : "en"];
+  const count = Math.max(5, Math.min(10, (questions && questions.count) || 8));
+  const docBlocks = documentBlocks(lecture, images);
+
   try {
-    const response = await client.messages.create({
-      model: "claude-opus-5",
-      max_tokens: 16000,
-      system: task === "quiz" || task === "case"
-        ? QUIZ_SYSTEM(lang)
-        : `You are a study assistant for Master's Physical Therapy students. Use only the provided lecture content. Write all text in ${lang}. Be clear, accurate and concise.`,
-      messages: [{ role: "user", content: `${instruction}\n\nLecture title: ${lecture.title}\n\n${content}` }],
-      output_config: { format: { type: "json_schema", schema: SCHEMAS[task] } },
-    });
-    if (response.stop_reason === "refusal") return res.status(502).json({ error: "Model declined the request" });
-    const text = response.content.find((b) => b.type === "text");
-    res.json(JSON.parse(text.text));
+    const jobs = [];
+    // Extraction (summary + questions): factual accuracy.
+    if (wanted.has("summary") || wanted.has("questions")) {
+      const specs = [wanted.has("summary") ? MODULE_A : "For \"summary\" return markdown \"\", pearls [] and terms [].", wanted.has("questions") ? MODULE_C(count) : "For \"questions\" return an empty array."];
+      jobs.push(callClaude({
+        instructions: `${langRule}\n\n${specs.join("\n\n")}\n\nReturn JSON only, matching the schema.`,
+        docBlocks, schema: SCHEMA_SUMMARY_QUESTIONS, temperature: TEMP_EXTRACTION,
+      }).then((r) => ({ summary: r.summary, questions: r.questions })));
+    }
+    // Case creation.
+    if (wanted.has("cases")) {
+      jobs.push(callClaude({
+        instructions: `${langRule}\n\n${MODULE_B}\n\nReturn JSON only, matching the schema.`,
+        docBlocks, schema: SCHEMA_CASES, temperature: TEMP_CASES,
+      }).then((r) => ({ cases: r.cases })));
+    }
+    const parts = await Promise.all(jobs);
+    const out = Object.assign({ summary: { markdown: "", pearls: [], terms: [] }, cases: [], questions: [] }, ...parts);
+    if (!wanted.has("summary")) delete out.summary;
+    res.json(out);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "AI request failed" });
+    res.status(500).json({ error: String(err.message || err) });
   }
 });
 
-app.listen(3000, () => console.log("AI backend listening on http://localhost:3000"));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`AI backend (${MODEL}) listening on http://localhost:${PORT}`));

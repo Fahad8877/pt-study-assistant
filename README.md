@@ -46,26 +46,44 @@ js/app.js               Views, upload flow, quiz and clinical case logic
 server-example/server.js  Example Node backend using the Claude API
 ```
 
-## Connecting a real AI API
+## Connecting a real AI API (multimodal, three modules)
 
 The UI only talks to `window.AI` (`analyze`, `quiz`, `clinicalCase`). Providers live in
-`js/ai/` and must return these JSON shapes:
+`js/ai/`. The built-in mock works offline; the API provider sends the parsed document to
+`server-example/server.js`, which calls the Claude API.
+
+**What the parser sends** (per slide/page, nothing is dropped): title, bullet hierarchy as
+Markdown, tables as Markdown tables, speaker notes, plus images for vision — every PDF page is
+rendered to a JPEG, and every embedded PPTX picture (diagrams, flowcharts, figures) is extracted.
+Images are stored in IndexedDB; text in localStorage.
+
+**Request** `POST /api/generate`
 
 ```
-analyze -> { explanation: string[], summary: string[],
-             concepts: [{ title, detail }], terms: [{ term, definition }] }
-quiz    -> { questions: [{ scenario, question, options: string[], answerIndex,
-                           explanation, whyOthers: string[] }] }
-           (request carries quiz: { count, slides: [{ number, text }] } for the selected scope)
-case    -> { title, presentation: string[], questions: [
-              { type: "mcq",  question, options, answerIndex, feedback } |
-              { type: "open", question, modelAnswer, keywords: string[] } ] }
+{ language: "ar" | "en", modules: ["summary","cases","questions"],
+  lecture: { title, slides: [{ number, title, markdown, notes, tables }] },
+  images:  [{ slide, kind: "page"|"figure", mediaType: "image/jpeg", data: <base64> }],
+  questions: { count } }
 ```
 
-To use the Claude API:
+**Response** (structured outputs enforce the shape)
+
+```
+{ summary:   { markdown, pearls: string[], terms: [{ term, definition }] },   // Module A
+  cases:     [{ title, demographics, chiefComplaint, hpi, vitals, exam,
+                reasoning: string[], plan: string[], questions: [...] }],      // Module B
+  questions: [{ scenario, question, options[4], answerIndex, explanation, whyOthers[4] }] } // Module C
+```
+
+The server embeds the elite-medical-tutor system prompt verbatim, runs extraction (summary +
+questions) and case creation as two parallel requests with `max_tokens` 16000, and applies
+`temperature` 0.2 / 0.3 when the configured model accepts sampling parameters (the 4.6-generation
+models); `claude-opus-5` (default) rejects `temperature`, so it is omitted there.
+
+To use it:
 
 1. Install Node.js 18+, then in `server-example/` run `npm install @anthropic-ai/sdk express cors`.
-2. Set `ANTHROPIC_API_KEY` in your environment and run `node server.js`.
+2. Set `ANTHROPIC_API_KEY` in your environment (optionally `CLAUDE_MODEL`) and run `node server.js`.
 3. In `js/config.js` set `aiProvider: "api"`.
 
 If the API is unreachable the app automatically falls back to the mock provider.

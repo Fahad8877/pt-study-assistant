@@ -8,7 +8,10 @@
  */
 window.APP_CONFIG = {
   aiProvider: "mock",
-  apiEndpoint: "http://localhost:3000/api/ai",
+  apiEndpoint: "http://localhost:3000/api/generate",
+  // Send page/slide images to the backend (vision). Set false to send text only.
+  apiSendImages: true,
+  apiMaxImages: 40,
   maxStoredChars: 200000,
   // Quiz length scales with the amount of selected content (slides/pages).
   quizMinQuestions: 3,
