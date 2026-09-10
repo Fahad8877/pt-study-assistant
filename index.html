@@ -19,6 +19,10 @@
     <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="14" y2="17"/></symbol>
     <symbol id="i-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></symbol>
+    <symbol id="i-slides" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-anatomy" viewBox="0 0 200 320" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="100" cy="34" r="22"/><path d="M100 56v14"/><path d="M62 92c10-14 26-22 38-22s28 8 38 22l8 60c2 12-4 22-14 24H68c-10-2-16-12-14-24z"/><path d="M62 92l-24 56c-3 8 0 16 6 20l16 10"/><path d="M138 92l24 56c3 8 0 16-6 20l-16 10"/><path d="M76 178l-6 54 4 46c1 8 4 14 8 18"/><path d="M124 178l6 54-4 46c-1 8-4 14-8 18"/><path d="M100 78v96"/><path d="M78 118h44M80 134h40M82 150h36"/><path d="M60 178h80"/><path d="M82 296h20M98 296h20"/></symbol>
   </svg>
 
   <div class="app">
@@ -37,7 +41,14 @@
         <a href="#/quiz" data-route="quiz"><svg><use href="#i-quiz"/></svg><span data-i18n="nav.quiz">Quiz</span></a>
         <a href="#/case" data-route="case"><svg><use href="#i-case"/></svg><span data-i18n="nav.case">Clinical Case</span></a>
       </nav>
-      <div class="sidebar-foot" data-i18n="app.foot">Master of Physical Therapy</div>
+      <div class="sidebar-foot">
+        <div class="lang-switch lang-switch-side" role="group" aria-label="Language">
+          <svg class="globe" aria-hidden="true"><use href="#i-globe"/></svg>
+          <button type="button" data-lang="en" class="active">EN</button>
+          <button type="button" data-lang="ar">عربي</button>
+        </div>
+        <div class="foot-note" data-i18n="app.foot">Master of Physical Therapy</div>
+      </div>
     </aside>
 
     <div class="main">

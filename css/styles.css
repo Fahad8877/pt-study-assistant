@@ -590,3 +590,66 @@ textarea.answer:focus { outline: none; border-color: var(--primary); box-shadow:
 @media (max-width: 400px) {
   .qa-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- Refinements (reference-inspired polish) ---------- */
+h1 { font-weight: 700; font-size: 1.85rem; letter-spacing: -0.01em; }
+html[dir="rtl"] h1 { letter-spacing: 0; }
+.card { border-radius: 14px; box-shadow: 0 1px 2px rgba(20, 30, 50, 0.04), 0 4px 14px rgba(20, 30, 50, 0.03); }
+.section { margin-top: 2.25rem; }
+.btn { border-radius: 10px; }
+.nav a svg, .bottom-nav a svg, .icon-box svg, .expect li svg { stroke-width: 1.75; }
+
+.brand-mark { width: 40px; height: 40px; }
+.brand-name { font-size: 1.02rem; }
+.nav a { padding: 0.78rem 0.95rem; }
+
+/* Language switch lives in the sidebar on desktop, in the top bar on mobile */
+.sidebar-foot { padding: 0 0.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.lang-switch-side { align-items: center; gap: 0.25rem; padding-inline-start: 0.6rem; width: fit-content; }
+.lang-switch-side .globe { width: 16px; height: 16px; color: var(--muted); flex-shrink: 0; }
+.foot-note { padding: 0 0.35rem; }
+.topbar .lang-switch { display: none; }
+
+.hero-main h2 { font-size: 1.6rem; font-weight: 700; }
+.hero-art { width: 150px; height: 240px; inset-inline-end: 34px; opacity: 0.13; }
+html[dir="rtl"] .hero-art { transform: translateY(-50%); }
+.hero-side blockquote { font-weight: 500; }
+
+.page-header .meta-row { display: flex; flex-wrap: wrap; gap: 1rem; color: var(--muted); font-size: 0.875rem; margin: 0; }
+.page-header .meta-row span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.page-header .meta-row svg { width: 16px; height: 16px; }
+.slide-nav .extra { display: none; }
+.slide-nav.expanded .extra { display: block; }
+.slide-nav .more { color: var(--primary); font-weight: 600; font-size: 0.82rem; }
+.slide-nav .more::before { content: "···"; letter-spacing: 0.15em; margin-inline-end: 0.4rem; color: var(--muted); }
+
+/* Scope choices render as radio buttons (same markup, styled) */
+.scope-options .option .letter {
+  width: 20px;
+  height: 20px;
+  margin-top: 0.15rem;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+  font-size: 0;
+  position: relative;
+}
+.scope-options .option.selected .letter { border-color: var(--primary); }
+.scope-options .option.selected .letter::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+.expect li svg { color: var(--muted); }
+.tagline { margin: 1.75rem 0 0; text-align: center; color: var(--muted); font-size: 0.8rem; letter-spacing: 0.04em; }
+html[dir="rtl"] .tagline { letter-spacing: 0; }
+
+@media (max-width: 860px) {
+  .topbar .lang-switch { display: inline-flex; }
+  .slide-nav .extra { display: block; }
+  .slide-nav .more { display: none; }
+  #start-quiz { width: 100%; }
+  .hero-art { width: 90px; height: 150px; inset-inline-end: 14px; }
+}

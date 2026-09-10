@@ -63,14 +63,14 @@
            <span class="tag">${esc(t("dash.continue"))}</span>
            <h2>${esc(last.title)}</h2>
            <p class="meta">${esc(t("dash.lastAccessed"))} · ${esc(formatDate(last.updatedAt))} · ${last.units} ${esc(last.unitType === "slides" ? t("lectures.slides") : t("lectures.pages"))}</p>
-           <a class="btn btn-primary btn-arrow" href="#/lecture/${last.id}">${esc(t("dash.continue.btn"))}</a>
-           <svg class="hero-art" aria-hidden="true"><use href="#i-spark"/></svg>
+           <a class="btn btn-primary btn-arrow" href="#/lecture/${last.id}">${esc(t("dash.continueLearning"))}</a>
+           <svg class="hero-art" aria-hidden="true"><use href="#i-anatomy"/></svg>
          </div>`
       : `<div class="hero-main">
            <span class="tag">${esc(t("dash.continue"))}</span>
            <p class="meta" style="margin-top:.2rem">${esc(t("dash.continue.empty"))}</p>
            <a class="btn btn-primary btn-arrow" href="#/upload">${esc(t("dash.upload"))}</a>
-           <svg class="hero-art" aria-hidden="true"><use href="#i-spark"/></svg>
+           <svg class="hero-art" aria-hidden="true"><use href="#i-anatomy"/></svg>
          </div>`;
 
     const quick = [
@@ -89,7 +89,7 @@
       <div class="list-row">
         <div class="icon-box ${l.fileType === "pptx" ? "pptx" : ""}">${icon("file")}</div>
         <div class="info"><h3>${esc(l.title)}</h3><div class="small">${esc(t("dash.lastAccessed"))} · ${esc(formatDate(l.updatedAt))}</div></div>
-        <a class="btn ${last && l.id === last.id ? "btn-primary" : "btn-secondary"} btn-arrow" href="#/lecture/${l.id}">${esc(last && l.id === last.id ? t("dash.continue.btn") : t("dash.open"))}</a>
+        <a class="btn ${last && l.id === last.id ? "btn-primary" : "btn-secondary"} btn-arrow" href="#/lecture/${l.id}">${esc(last && l.id === last.id ? t("dash.continue.btn") : t("dash.start"))}</a>
       </div>`).join("");
 
     view.innerHTML = `
@@ -214,7 +214,11 @@
       <div class="page-header">
         <a href="#/lectures" class="crumb">${esc(t("nav.lectures"))}</a>
         <h1>${esc(lecture.title)}</h1>
-        <p class="small">${esc(lecture.fileName)} · ${esc(lectureMeta(lecture))}</p>
+        <p class="meta-row">
+          <span>${icon("slides")} ${segs.length} ${esc(lecture.unitType === "pages" ? t("lectures.pages") : t("lectures.slides"))}</span>
+          <span>${icon("calendar")} ${esc(formatDate(lecture.createdAt))}</span>
+          <span>${icon("file")} ${esc(lecture.fileName)}</span>
+        </p>
         <div class="btn-row">
           <a class="btn btn-primary btn-arrow" href="#/quiz/${lecture.id}">${esc(t("lecture.startQuiz"))}</a>
           <a class="btn btn-secondary" href="#/case/${lecture.id}">${esc(t("lecture.startCase"))}</a>
@@ -222,9 +226,10 @@
         </div>
       </div>
       <div class="lecture-layout">
-        <aside class="card slide-nav" id="slide-nav">
+        <aside class="card slide-nav ${current >= 8 ? "expanded" : ""}" id="slide-nav">
           <div class="label">${esc(t("lecture.slides"))}</div>
-          ${segs.map((s) => `<button type="button" data-slide="${s.index}" class="${s.index === current ? "active" : ""}"><strong>${esc(unit)} ${s.number}</strong><span dir="auto">${esc(s.title)}</span></button>`).join("")}
+          ${segs.map((s) => `<button type="button" data-slide="${s.index}" class="${s.index >= 8 ? "extra " : ""}${s.index === current ? "active" : ""}"><strong>${esc(unit)} ${s.number}</strong><span dir="auto">${esc(s.title)}</span></button>`).join("")}
+          ${segs.length > 8 ? `<button type="button" class="more" id="slide-more">${esc(fill("lecture.more", { n: segs.length - 8 }))}</button>` : ""}
         </aside>
         <div class="card" id="analysis">${spinner(t("lecture.analyzing"))}</div>
       </div>`;
@@ -239,6 +244,12 @@
       tabState[lecture.id] = "content";
       renderAnalysis(lecture);
     }));
+    const more = document.getElementById("slide-more");
+    if (more) more.addEventListener("click", () => {
+      const nav = document.getElementById("slide-nav");
+      nav.classList.toggle("expanded");
+      more.textContent = nav.classList.contains("expanded") ? t("lecture.less") : fill("lecture.more", { n: segs.length - 8 });
+    });
     await renderAnalysis(lecture);
   }
 
@@ -360,7 +371,7 @@
       </label>`).join("");
 
     view.innerHTML = `
-      ${quizHeader(lecture)}
+      <div class="page-header"><h1>${esc(t("quiz.title"))}</h1><p>${esc(lecture.title)}</p><p class="small" style="margin-top:.25rem">${esc(t("quiz.subtitle"))}</p></div>
       <div class="card">
         <div class="scope-head">
           <div><h2>${esc(t("quiz.scopeTitle"))}</h2><p class="muted">${esc(t("quiz.scopeHint"))}</p></div>
@@ -401,7 +412,8 @@
           <li>${icon("check")}<span>${esc(t("quiz.expect3"))}</span></li>
           <li>${icon("file")}<span>${esc(t("quiz.expect4"))}</span></li>
         </ul>
-      </div>`;
+      </div>
+      <p class="tagline">${esc(t("quiz.tagline"))}</p>`;
 
     const picker = document.getElementById("slide-picker");
     const preview = document.getElementById("count-preview");
